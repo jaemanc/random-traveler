@@ -5,6 +5,23 @@ const json = (body,status=200)=>new Response(JSON.stringify(body),{status,header
 export default { async fetch(request,env){
  const u=new URL(request.url),origin=u.searchParams.get('origin'),destination=u.searchParams.get('destination'),hours=Number(u.searchParams.get('hours')),kind=u.searchParams.get('kind');
  if(!airports.has(origin)||!airports.has(destination)||origin===destination||![12,24,48].includes(hours)||!['one-way','round-trip'].includes(kind))return json({error:'Invalid search'},400);
+ if(u.searchParams.get('provider')==='skyscanner'){
+  if(!env.SKYSCANNER_API_KEY)return json({fare:null,reason:'partner_access_required'});
+  const key='sky:'+origin+destination+kind+hours,cached=cache.get(key);
+  if(cached&&cached.until>Date.now())return json(cached.value);
+  const date=new Intl.DateTimeFormat('en-CA',{timeZone:zones[origin],year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const [year,month,day]=date.split('-').map(Number);
+  const leg=(a,b,d)=>({originPlace:{queryPlace:{iata:a}},destinationPlace:{queryPlace:{iata:b}},fixedDate:{year:d.getUTCFullYear(),month:d.getUTCMonth()+1,day:d.getUTCDate()}});
+  const depart=new Date(Date.UTC(year,month-1,day)),back=new Date(depart);back.setUTCDate(back.getUTCDate()+3);
+  const queryLegs=[leg(origin,destination,depart)];if(kind==='round-trip')queryLegs.push(leg(destination,origin,back));
+  const response=await fetch('https://partners.api.skyscanner.net/apiservices/v3/flights/indicative/search',{method:'POST',headers:{'x-api-key':env.SKYSCANNER_API_KEY,'content-type':'application/json'},body:JSON.stringify({query:{market:'US',locale:'en-US',currency:'USD',queryLegs}})});
+  if(!response.ok)return json({fare:null,reason:'provider_unavailable'},502);
+  const quotes=Object.values((await response.json()).content?.results?.quotes||{});
+  const scale={PRICE_UNIT_WHOLE:1,PRICE_UNIT_CENTI:100,PRICE_UNIT_MILLI:1000,PRICE_UNIT_MICRO:1000000};
+  const prices=quotes.map(q=>Number(q.minPrice?.amount)/(scale[q.minPrice?.unit]||NaN)).filter(n=>Number.isFinite(n)&&n>0);
+  const value={fare:prices.length?{amount:Math.min(...prices),currency:'USD',date}:null};
+  cache.set(key,{value,until:Date.now()+600000});return json(value);
+ }
  if(!env.DUFFEL_TOKEN)return json({error:'Missing Duffel token'},503);
  const key=u.searchParams.toString(),cached=cache.get(key);if(cached&&cached.until>Date.now())return json(cached.value);
  const now=new Date(),end=new Date(now.getTime()+hours*3600000);

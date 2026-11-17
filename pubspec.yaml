@@ -12,7 +12,6 @@ dependencies:
   http: ^1.5.0
   share_plus: ^12.0.1
   screenshot: ^3.0.0
-  path_provider: ^2.1.5
   url_launcher: ^6.3.2
 dev_dependencies:
   flutter_test:
@@ -20,3 +19,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 flutter:
   uses-material-design: true
+  assets:
+    - assets/earth-blue-marble.jpg
+    - assets/skyscanner-powered-by.png
+    - assets/attractions.json
+    - assets/attractions/

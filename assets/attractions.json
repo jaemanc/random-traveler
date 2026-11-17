@@ -1,0 +1,604 @@
+{
+  "Seoul": [
+    {
+      "title": "Bukchon Hanok Village",
+      "asset": "assets/attractions/seoul-bukchon-hanok-village.jpg",
+      "author": "Bgag",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Bukchon_Hanok_Village_01.jpg"
+    },
+    {
+      "title": "Cheonggyecheon",
+      "asset": "assets/attractions/seoul-cheonggyecheon.jpg",
+      "author": "Basile Morin",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Cheonggyecheon_stream_at_sunrise_with_trees_in_Seoul.jpg"
+    },
+    {
+      "title": "Dongdaemun Design Plaza",
+      "asset": "assets/attractions/seoul-dongdaemun-design-plaza.jpg",
+      "author": "Eugene Lim",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Dongdaemun_Design_Plaza_at_night%2C_Seoul%2C_Korea.jpg"
+    },
+    {
+      "title": "Seoul",
+      "asset": "assets/attractions/seoul-seoul.jpg",
+      "author": "Eunmi Park",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:%EC%A4%91%ED%99%94%EC%A0%84%EC%9D%98_%EB%82%AE.jpg"
+    },
+    {
+      "title": "Seoul City Hall",
+      "asset": "assets/attractions/seoul-seoul-city-hall.jpg",
+      "author": "Tristan Surtel",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Seoul_City_Hall_from_Plaza.jpg"
+    },
+    {
+      "title": "War Memorial of Korea",
+      "asset": "assets/attractions/seoul-war-memorial-of-korea.jpg",
+      "author": "*Youngjin",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:The_War_Memorial_Of_Korea_240615_02.jpg"
+    }
+  ],
+  "Busan": [
+    {
+      "title": "Haeundae Beach",
+      "asset": "assets/attractions/busan-haeundae-beach.jpg",
+      "author": "Brit in Seoul",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Haeundae_Beach_May_2024.jpg"
+    },
+    {
+      "title": "Gwangalli Beach",
+      "asset": "assets/attractions/busan-gwangalli-beach.jpg",
+      "author": "Chelsea Hicks",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Gwangalli_Beach.jpg"
+    },
+    {
+      "title": "Gamcheon Culture Village",
+      "asset": "assets/attractions/busan-gamcheon-culture-village.jpg",
+      "author": "Bl00dnFl4mes",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Gamcheon_Houses%2C_2024.jpg"
+    },
+    {
+      "title": "Haedong Yonggungsa",
+      "asset": "assets/attractions/busan-haedong-yonggungsa.jpg",
+      "author": "박혜민",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:%ED%95%B4%EB%8F%99%EC%9A%A9%EA%B6%81%EC%82%AC_%EC%82%AC%EC%B0%B0_%EC%A0%84%EA%B2%BD.jpg"
+    },
+    {
+      "title": "Busan Tower",
+      "asset": "assets/attractions/busan-busan-tower.jpg",
+      "author": "Mobius6",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Busan_Tower_and_Yongdusan_Park_20200522_003.jpg"
+    },
+    {
+      "title": "Gwangan Bridge",
+      "asset": "assets/attractions/busan-gwangandaegyo.jpg",
+      "author": "Glabb",
+      "license": "Public domain",
+      "source": "https://commons.wikimedia.org/wiki/File:Gwangan_Bridge1.jpg"
+    }
+  ],
+  "Jeju": [
+    {
+      "title": "Hallasan",
+      "asset": "assets/attractions/jeju-hallasan.jpg",
+      "author": "LG전자",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Hallasan_Above.jpg"
+    },
+    {
+      "title": "Seongsan Ilchulbong",
+      "asset": "assets/attractions/jeju-seongsan-ilchulbong.jpg",
+      "author": "Korea.net / Korean Culture and Information Service",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Seongsan_Ilchulbong_from_the_air.jpg"
+    },
+    {
+      "title": "Manjanggul",
+      "asset": "assets/attractions/jeju-manjanggul.jpg",
+      "author": "AhmadElq",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Manjanggul_lava_column%2C_largest_in_the_world.jpg"
+    },
+    {
+      "title": "Cheonjiyeon Waterfall",
+      "asset": "assets/attractions/jeju-cheonjiyeon-waterfall.jpg",
+      "author": "Martin Chen",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Korea-Jeju-Cheonjiyeon_Waterfall-01.jpg"
+    },
+    {
+      "title": "Jeju Island",
+      "asset": "assets/attractions/jeju-jeju-island.jpg",
+      "author": "Robert Simmon, using Landsat data provided by the United States Geological Survey.",
+      "license": "Public domain",
+      "source": "https://commons.wikimedia.org/wiki/File:Jeju_Island.jpg"
+    },
+    {
+      "title": "Jeju City",
+      "asset": "assets/attractions/jeju-jeju-city.jpg",
+      "author": "J. Patrick Fischer",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Jeju_-_Hallasan.JPG"
+    }
+  ],
+  "Tokyo": [
+    {
+      "title": "Tokyo Tower",
+      "asset": "assets/attractions/tokyo-tokyo-tower.jpg",
+      "author": "Akonnchiroll",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Tokyo_Tower_2023.jpg"
+    },
+    {
+      "title": "Sensō-ji",
+      "asset": "assets/attractions/tokyo-sens-ji.jpg",
+      "author": "Akonnchiroll",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Sensoji_2023.jpg"
+    },
+    {
+      "title": "Shibuya Crossing",
+      "asset": "assets/attractions/tokyo-shibuya-crossing.jpg",
+      "author": "David Kernan",
+      "license": "CC BY 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Shibuya_Crossing%2C_Aerial.jpg"
+    },
+    {
+      "title": "Tokyo Skytree",
+      "asset": "assets/attractions/tokyo-tokyo-skytree.jpg",
+      "author": "Kakidai",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Tokyo_Skytree_2014_%E2%85%A2.jpg"
+    },
+    {
+      "title": "Rainbow Bridge (Tokyo)",
+      "asset": "assets/attractions/tokyo-rainbow-bridge-tokyo.jpg",
+      "author": "Kakidai",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Rainbow_Bridge_%28Tokyo%29_at_night_8.jpg"
+    },
+    {
+      "title": "Shinjuku Gyo-en",
+      "asset": "assets/attractions/tokyo-shinjuku-gyo-en.jpg",
+      "author": "Kakidai",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Shinjuku_Gyoen_National_Garden_-_sakura_3.JPG"
+    }
+  ],
+  "Fukuoka": [
+    {
+      "title": "Fukuoka Tower",
+      "asset": "assets/attractions/fukuoka-fukuoka-tower.jpg",
+      "author": "Steffen Flor",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Fukuoka_Tower_Before_Sunset.jpg"
+    },
+    {
+      "title": "Dazaifu Tenmangū",
+      "asset": "assets/attractions/fukuoka-dazaifu-tenmangu.jpg",
+      "author": "Jakub Hałun",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:20100719_Dazaifu_Tenmangu_Shrine_3328.jpg"
+    },
+    {
+      "title": "Ōhori Park",
+      "asset": "assets/attractions/fukuoka-hori-park.jpg",
+      "author": "Tzuhsun Hsu from Taipei, Taiwan",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:%E5%A4%A7%E6%BF%A0%E5%85%AC%E5%9C%92_%283360365578%29.jpg"
+    },
+    {
+      "title": "Fukuoka Castle",
+      "asset": "assets/attractions/fukuoka-fukuoka-castle.jpg",
+      "author": "Mukai",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Fukuoka_Castle_Simonohasi_Otemon_gate.JPG"
+    },
+    {
+      "title": "Hakata Station",
+      "asset": "assets/attractions/fukuoka-hakata-station.jpg",
+      "author": "ぱちょぴ",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:JR_Hakata_City_2011_Jan.jpg"
+    }
+  ],
+  "Osaka": [
+    {
+      "title": "Osaka Castle",
+      "asset": "assets/attractions/osaka-osaka-castle.jpg",
+      "author": "663highland",
+      "license": "CC BY 2.5",
+      "source": "https://commons.wikimedia.org/wiki/File:Osaka_Castle_03bs3200.jpg"
+    },
+    {
+      "title": "Dōtonbori",
+      "asset": "assets/attractions/osaka-d-tonbori.jpg",
+      "author": "Type specimen",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Osaka_Dotonbori_Ebisu_Bridge.jpg"
+    },
+    {
+      "title": "Umeda Sky Building",
+      "asset": "assets/attractions/osaka-umeda-sky-building.jpg",
+      "author": "Kakidai",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:2018_Umeda_Sky_Building.jpg"
+    },
+    {
+      "title": "Osaka Aquarium Kaiyukan",
+      "asset": "assets/attractions/osaka-osaka-aquarium-kaiyukan.jpg",
+      "author": "Sakai Yayoi",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Kaiy%C5%ABkan.jpg"
+    },
+    {
+      "title": "Osaka",
+      "asset": "assets/attractions/osaka-osaka.jpg",
+      "author": "663highland",
+      "license": "CC BY 2.5",
+      "source": "https://commons.wikimedia.org/wiki/File:Osaka_Castle_03bs3200.jpg"
+    },
+    {
+      "title": "Ōsaka Station",
+      "asset": "assets/attractions/osaka-osaka-station.jpg",
+      "author": "Sakai Yayoi",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:JR_Osaka_Station_2026.jpg"
+    }
+  ],
+  "Taipei": [
+    {
+      "title": "Chiang Kai-shek Memorial Hall",
+      "asset": "assets/attractions/taipei-chiang-kai-shek-memorial-hall.jpg",
+      "author": "AngMoKio",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Chiang_Kai-shek_memorial_amk.jpg"
+    },
+    {
+      "title": "Ximending",
+      "asset": "assets/attractions/taipei-ximending.jpg",
+      "author": "Mrmarkertw",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:%E5%BE%9E%E5%B1%88%E8%87%A3%E6%B0%8F%E8%A5%BF%E9%96%80%E9%96%80%E5%B8%82%E5%88%B0%E9%8C%A2%E6%AB%83%E5%8F%B0%E5%8C%97%E4%B8%AD%E8%8F%AF%E6%96%B0%E9%A4%A8_20211204.jpg"
+    },
+    {
+      "title": "Taipei Grand Mosque",
+      "asset": "assets/attractions/taipei-taipei-grand-mosque.jpg",
+      "author": "Winertai",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Taipei_Grand_Mosque_20060112.jpg"
+    },
+    {
+      "title": "Taipei",
+      "asset": "assets/attractions/taipei-taipei.jpg",
+      "author": "毛貓大少爺",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Taipei_Skyline_2022.06.29.jpg"
+    },
+    {
+      "title": "Maokong",
+      "asset": "assets/attractions/taipei-maokong.jpg",
+      "author": "Outlookxp",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:%E8%B2%93%E7%A9%BA%E5%A3%BA%E7%A9%B4.JPG"
+    },
+    {
+      "title": "Sun Yat-sen Memorial Hall (Taipei)",
+      "asset": "assets/attractions/taipei-sun-yat-sen-memorial-hall-taipei.jpg",
+      "author": "Cary Bass",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:SYS_Memorial_Hall_view_from_Taipei_101_20070801.jpg"
+    }
+  ],
+  "Bangkok": [
+    {
+      "title": "Grand Palace",
+      "asset": "assets/attractions/bangkok-grand-palace.jpg",
+      "author": "Preecha.MJ",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:0005574_-_Wat_Phra_Kaew_006.jpg"
+    },
+    {
+      "title": "Wat Arun",
+      "asset": "assets/attractions/bangkok-wat-arun.jpg",
+      "author": "Mastertongapollo",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:%E0%B9%80%E0%B8%88%E0%B8%94%E0%B8%B5%E0%B8%A2%E0%B9%8C%E0%B8%9B%E0%B8%A3%E0%B8%B0%E0%B8%98%E0%B8%B2%E0%B8%99%E0%B8%97%E0%B8%A3%E0%B8%87%E0%B8%9B%E0%B8%A3%E0%B8%B2%E0%B8%87%E0%B8%84%E0%B9%8C%E0%B8%A7%E0%B8%B1%E0%B8%94%E0%B8%AD%E0%B8%A3%E0%B8%B8%E0%B8%932.jpg"
+    },
+    {
+      "title": "Wat Pho",
+      "asset": "assets/attractions/bangkok-wat-pho.jpg",
+      "author": "Mastertongapollo",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:%E0%B8%9E%E0%B8%A3%E0%B8%B0%E0%B8%9E%E0%B8%B8%E0%B8%97%E0%B8%98%E0%B9%84%E0%B8%AA%E0%B8%A2%E0%B8%B2%E0%B8%AA%E0%B8%A7%E0%B8%B1%E0%B8%94%E0%B8%9E%E0%B8%A3%E0%B8%B0%E0%B9%80%E0%B8%8A%E0%B8%95%E0%B8%B8%E0%B8%9E%E0%B8%99.jpg"
+    },
+    {
+      "title": "Lumphini Park",
+      "asset": "assets/attractions/bangkok-lumphini-park.jpg",
+      "author": "Terence Ong",
+      "license": "CC BY 2.5",
+      "source": "https://commons.wikimedia.org/wiki/File:Aerial_view_of_Lumphini_Park.jpg"
+    },
+    {
+      "title": "Wat Saket",
+      "asset": "assets/attractions/bangkok-wat-saket.jpg",
+      "author": "BerryJ",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:%E0%B8%A7%E0%B8%B1%E0%B8%94%E0%B8%AA%E0%B8%A3%E0%B8%B0%E0%B9%80%E0%B8%81%E0%B8%A8-2.jpg"
+    },
+    {
+      "title": "Siam Paragon",
+      "asset": "assets/attractions/bangkok-siam-paragon.jpg",
+      "author": "This Photo was taken by Supanut Arunoprayote.\n\nFeel free to use any of my images, but please mention",
+      "license": "CC BY 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Siam_Paragon_06.23.jpg"
+    }
+  ],
+  "Singapore": [
+    {
+      "title": "Marina Bay Sands",
+      "asset": "assets/attractions/singapore-marina-bay-sands.jpg",
+      "author": "This Photo was taken by Supanut Arunoprayote.\n\nFeel free to use any of my images, but please mention",
+      "license": "CC BY 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Marina_Bay_Sands_%28I%29.jpg"
+    },
+    {
+      "title": "Gardens by the Bay",
+      "asset": "assets/attractions/singapore-gardens-by-the-bay.jpg",
+      "author": "Shiny Things.",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Supertree_Grove%2C_Gardens_by_the_Bay%2C_Singapore_-_20120712-02.jpg"
+    },
+    {
+      "title": "ArtScience Museum",
+      "asset": "assets/attractions/singapore-artscience-museum.jpg",
+      "author": "Basile Morin",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:ArtScience_Museum%2C_Marina_Bay_Sands%2C_Singapore.jpg"
+    },
+    {
+      "title": "Singapore Flyer",
+      "asset": "assets/attractions/singapore-singapore-flyer.jpg",
+      "author": "DvTor8303",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Singapore_Flyer_20250903.jpg"
+    },
+    {
+      "title": "National Gallery Singapore",
+      "asset": "assets/attractions/singapore-national-gallery-singapore.jpg",
+      "author": "Basile Morin",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Interior_of_the_National_Gallery_Singapore.jpg"
+    },
+    {
+      "title": "Esplanade – Theatres on the Bay",
+      "asset": "assets/attractions/singapore-esplanade-theatres-on-the-bay.jpg",
+      "author": "William Cho",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:The_Esplanade_%E2%80%93_Theatres_on_the_Bay.jpg"
+    }
+  ],
+  "Hong Kong": [
+    {
+      "title": "Victoria Harbour",
+      "asset": "assets/attractions/hong-kong-victoria-harbour.jpg",
+      "author": "War Office",
+      "license": "Public domain",
+      "source": "https://commons.wikimedia.org/wiki/File:1957_map_of_Victoria_Harbour_by_the_British_War_Office.jpg"
+    },
+    {
+      "title": "Victoria Peak",
+      "asset": "assets/attractions/hong-kong-victoria-peak.jpg",
+      "author": "Daniel Case",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:High_West_and_Victoria_Peak_from_Victoria_Gap_%28crop1%29.jpg"
+    },
+    {
+      "title": "Man Mo temples in Hong Kong",
+      "asset": "assets/attractions/hong-kong-man-mo-temple.jpg",
+      "author": "Richard Mortel from Riyadh, Saudi Arabia",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Man_Mo_Temple%2C_1847-62%2C_Sheung_Wan%2C_Hong_Kong_%2817%29_%2832748033042%29.jpg"
+    },
+    {
+      "title": "Ngong Ping 360",
+      "asset": "assets/attractions/hong-kong-ngong-ping-360.jpg",
+      "author": "Sparktour",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Ngong_Ping_360_Cable_Car_and_HKG_2021-09.jpg"
+    },
+    {
+      "title": "Hong Kong Museum of Art",
+      "asset": "assets/attractions/hong-kong-hong-kong-museum-of-art.jpg",
+      "author": "Wpcpey",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Hong_Kong_Museum_of_Art_renovation_site_201908.jpg"
+    },
+    {
+      "title": "Peak Tram",
+      "asset": "assets/attractions/hong-kong-peak-tram.jpg",
+      "author": "Samson Ng . D201@EAL",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:CWA_6th_Generation_Peak_Tram.jpg"
+    }
+  ],
+  "Paris": [
+    {
+      "title": "Arc de Triomphe",
+      "asset": "assets/attractions/paris-arc-de-triomphe.jpg",
+      "author": "ZeusUpsistos",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Arc_de_Triomphe_-_Ao%C3%BBt_2026.jpg"
+    },
+    {
+      "title": "Palace of Versailles",
+      "asset": "assets/attractions/paris-palace-of-versailles.jpg",
+      "author": "ToucanWings",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Versailles_Palace_%28FRA%29_%E2%80%93_Equestrian_Olympic_Venue.jpg"
+    },
+    {
+      "title": "Montmartre",
+      "asset": "assets/attractions/paris-montmartre.jpg",
+      "author": "Navin75",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:View_from_Notre-Dame_de_Paris%2C_24_June_2014_004.jpg"
+    },
+    {
+      "title": "Paris",
+      "asset": "assets/attractions/paris-paris.jpg",
+      "author": "Yann Caradec from Paris, France",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:La_Tour_Eiffel_vue_de_la_Tour_Saint-Jacques%2C_Paris_ao%C3%BBt_2014_%282%29.jpg"
+    },
+    {
+      "title": "Champs-Élysées",
+      "asset": "assets/attractions/paris-champs-lys-es.jpg",
+      "author": "Josh Hallett",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Avenue_des_Champs-%C3%89lys%C3%A9es_July_24%2C_2009_N1.jpg"
+    },
+    {
+      "title": "Tuileries Garden",
+      "asset": "assets/attractions/paris-tuileries-garden.jpg",
+      "author": "Guilhem Vellut from Tokyo, Japan",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Crowd_in_the_Jardin_des_Tuileries%2C_Paris_July_2014.jpg"
+    }
+  ],
+  "London": [
+    {
+      "title": "Big Ben",
+      "asset": "assets/attractions/london-big-ben.jpg",
+      "author": "Christian David",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Elizabeth_Tower_and_the_north_front_of_the_Palace_of_Westminster%2C_London.jpg"
+    },
+    {
+      "title": "Tower Bridge",
+      "asset": "assets/attractions/london-tower-bridge.jpg",
+      "author": "Fuzzypiggy",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Tower_Bridge_at_Dawn.jpg"
+    },
+    {
+      "title": "British Museum",
+      "asset": "assets/attractions/london-british-museum.jpg",
+      "author": "Ham",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:British_Museum_from_NE_2.JPG"
+    },
+    {
+      "title": "St Paul's Cathedral",
+      "asset": "assets/attractions/london-st-paul-s-cathedral.jpg",
+      "author": "Mark Fosh",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:St_Pauls_aerial_%28cropped%29.jpg"
+    },
+    {
+      "title": "Westminster Abbey",
+      "asset": "assets/attractions/london-westminster-abbey.jpg",
+      "author": "Antiquary",
+      "license": "CC BY 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Westminster_Abbey%2C_Westminster.jpg"
+    },
+    {
+      "title": "The Shard",
+      "asset": "assets/attractions/london-the-shard.jpg",
+      "author": "Colin",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:The_Shard_at_sunset_2017_%28cropped%29.jpg"
+    }
+  ],
+  "New York": [
+    {
+      "title": "Statue of Liberty",
+      "asset": "assets/attractions/new-york-statue-of-liberty.jpg",
+      "author": "AskALotl",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Front_view_of_Statue_of_Liberty_%28cropped%29.jpg"
+    },
+    {
+      "title": "Central Park",
+      "asset": "assets/attractions/new-york-central-park.jpg",
+      "author": "Anthony Quintano from Hillsborough, NJ, United States",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Global_Citizen_Festival_Central_Park_New_York_City_from_NYonAir_%2815351915006%29.jpg"
+    },
+    {
+      "title": "Empire State Building",
+      "asset": "assets/attractions/new-york-empire-state-building.jpg",
+      "author": "Sam Valadi",
+      "license": "Public domain",
+      "source": "https://commons.wikimedia.org/wiki/File:Empire_State_Building_%28aerial_view%29.jpg"
+    },
+    {
+      "title": "Grand Central Terminal",
+      "asset": "assets/attractions/new-york-grand-central-terminal.jpg",
+      "author": "Fcb981 ; Eric Baetscher (attribution required)",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Image-Grand_central_Station_Outside_Night_2.jpg"
+    },
+    {
+      "title": "New York City",
+      "asset": "assets/attractions/new-york-new-york-city.jpg",
+      "author": "Dllu",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:View_of_Empire_State_Building_from_Rockefeller_Center_New_York_City_dllu_%28cropped%29.jpg"
+    },
+    {
+      "title": "Flatiron Building",
+      "asset": "assets/attractions/new-york-flatiron-building.jpg",
+      "author": "Imelenchon (original work)",
+      "license": "Public domain",
+      "source": "https://commons.wikimedia.org/wiki/File:Edificio_Fuller_%28Flatiron%29_en_2010_desde_el_Empire_State_crop_boxin.jpg"
+    }
+  ],
+  "Los Angeles": [
+    {
+      "title": "Hollywood Sign",
+      "asset": "assets/attractions/los-angeles-hollywood-sign.jpg",
+      "author": "Gnaphron",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Hollywood_sign_%288485145044%29.jpg"
+    },
+    {
+      "title": "Santa Monica Pier",
+      "asset": "assets/attractions/los-angeles-santa-monica-pier.jpg",
+      "author": "web4camguy",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Santa_monica_pier_entrance_evening.jpg"
+    },
+    {
+      "title": "Los Angeles",
+      "asset": "assets/attractions/los-angeles-los-angeles.jpg",
+      "author": "Gnaphron",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Hollywood_sign_%288485145044%29.jpg"
+    },
+    {
+      "title": "Los Angeles County Museum of Art",
+      "asset": "assets/attractions/los-angeles-los-angeles-county-museum-of-art.jpg",
+      "author": "Gunnar Klack",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:LACMA-Los-Angeles-County-Museum-of-Art-04-2014.jpg"
+    },
+    {
+      "title": "Los Angeles City Hall",
+      "asset": "assets/attractions/los-angeles-los-angeles-city-hall.jpg",
+      "author": "Michael J Fromholtz",
+      "license": "Public domain",
+      "source": "https://commons.wikimedia.org/wiki/File:Los_Angeles_City_Hall_2013.jpg"
+    }
+  ]
+}

@@ -1,15 +1,16 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_globe/flutter_globe.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
 import 'data.dart';
+import 'satellite_layer.dart';
 
 const gold = Color(0xffeac58d),
     bg = Color(0xff08121c),
@@ -49,6 +50,25 @@ class Trip {
   final Flight? flight;
 }
 
+class SkyscannerFare {
+  SkyscannerFare.fromJson(Map<String, dynamic> j)
+    : amount = (j['amount'] as num).toDouble(),
+      currency = j['currency'] as String,
+      date = j['date'] as String;
+  final double amount;
+  final String currency, date;
+}
+
+class Attraction {
+  Attraction.fromJson(Map<String, dynamic> j)
+    : title = j['title'] as String,
+      asset = j['asset'] as String,
+      author = j['author'] as String,
+      license = j['license'] as String,
+      source = j['source'] as String;
+  final String title, asset, author, license, source;
+}
+
 class Home extends StatefulWidget {
   const Home({super.key});
   @override
@@ -58,21 +78,50 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
   Place? origin;
   Trip? trip;
-  bool manual = false, busy = false, imageFailed = false;
-  int hours = 12;
-  String region = 'Anywhere', kind = 'round-trip', notice = '';
+  bool manual = false, busy = false, revealed = false, fareLoading = false;
+  int revealVersion = 0, activePhoto = 0;
+  String notice = '';
+  ui.Image? earth;
+  SkyscannerFare? skyscannerFare;
+  Map<String, List<Attraction>> attractions = {};
   final capture = ScreenshotController();
   late final GlobeController globe = GlobeController(autoRotate: false);
   @override
   void initState() {
     super.initState();
     _locate();
+    _loadAssets();
   }
 
   @override
   void dispose() {
+    earth?.dispose();
     globe.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAssets() async {
+    final data = await rootBundle.load('assets/earth-blue-marble.jpg');
+    final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+    final image = (await codec.getNextFrame()).image;
+    final decoded =
+        jsonDecode(await rootBundle.loadString('assets/attractions.json'))
+            as Map<String, dynamic>;
+    if (!mounted) {
+      image.dispose();
+      return;
+    }
+    setState(() {
+      earth = image;
+      attractions = decoded.map(
+        (city, photos) => MapEntry(
+          city,
+          (photos as List)
+              .map((p) => Attraction.fromJson(p as Map<String, dynamic>))
+              .toList(),
+        ),
+      );
+    });
   }
 
   Future<void> _locate() async {
@@ -111,10 +160,10 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
     }
   }
 
-  void _fly(Place from, Place to) {
+  void _fly(Place from, Place to, int version) {
     globe.lookAt(GlobeCoordinate(latitude: from.lat, longitude: from.lon));
     Future.delayed(const Duration(milliseconds: 1800), () {
-      if (mounted) {
+      if (mounted && revealVersion == version) {
         globe.animateTo(
           coordinate: GlobeCoordinate(latitude: to.lat, longitude: to.lon),
           vsync: this,
@@ -126,14 +175,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
   }
 
   List<Place> get destinations => places
-      .where(
-        (p) =>
-            p.code != origin?.code &&
-            p.city != origin?.city &&
-            (region == 'Anywhere' ||
-                (region == 'Domestic') ==
-                    (p.countryCode == origin?.countryCode)),
-      )
+      .where((p) => p.code != origin?.code && p.city != origin?.city)
       .toList();
   Future<void> _surprise() async {
     final from = origin;
@@ -142,8 +184,11 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
       busy = true;
       trip = null;
       notice = '';
-      imageFailed = false;
+      revealed = false;
+      skyscannerFare = null;
+      activePhoto = 0;
     });
+    final version = ++revealVersion;
     final targets = destinations..shuffle();
     if (targets.isEmpty) {
       setState(() {
@@ -174,8 +219,8 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
               queryParameters: {
                 'origin': airport.code,
                 'destination': to.code,
-                'hours': '$hours',
-                'kind': kind,
+                'hours': '12',
+                'kind': 'round-trip',
               },
             );
             final response = await http
@@ -207,35 +252,51 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
             'Live flight search is unavailable. Showing a sample destination.';
       }
     });
-    _fly(found.from, found.to);
+    _fly(found.from, found.to, version);
+    _loadSkyscanner(found);
+    Future.delayed(const Duration(milliseconds: 4500), () {
+      if (mounted && revealVersion == version) setState(() => revealed = true);
+    });
   }
 
-  Future<void> _openFlights() async {
-    final t = trip;
-    if (t == null) return;
-    final date =
-        t.flight?.depart.substring(0, 10) ??
-        DateTime.now().toIso8601String().substring(0, 10);
-    final url = Uri.parse(
-      'https://www.google.com/travel/flights?hl=en#flt=${t.from.code}.${t.to.code}.$date;c:USD;e:1;sd:1;t:f',
-    );
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication) &&
-        mounted) {
-      setState(() => notice = 'Could not open flight search.');
+  Future<void> _loadSkyscanner(Trip t) async {
+    if (api.isEmpty) return;
+    setState(() => fareLoading = true);
+    try {
+      final uri = Uri.parse(api).replace(
+        queryParameters: {
+          'provider': 'skyscanner',
+          'origin': t.from.code,
+          'destination': t.to.code,
+          'hours': '12',
+          'kind': 'round-trip',
+        },
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 20));
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (mounted && trip == t && data['fare'] != null) {
+        setState(() => skyscannerFare = SkyscannerFare.fromJson(data['fare']));
+      }
+    } catch (_) {
+      /* Price remains unavailable. */
     }
+    if (mounted && trip == t) setState(() => fareLoading = false);
   }
 
   Future<void> _share() async {
     try {
       final bytes = await capture.capture(pixelRatio: 2);
       if (bytes == null) throw Exception();
-      final file = File(
-        '${(await getTemporaryDirectory()).path}/elsewhere-trip.png',
-      );
-      await file.writeAsBytes(bytes);
       await SharePlus.instance.share(
         ShareParams(
-          files: [XFile(file.path)],
+          files: [
+            XFile.fromData(
+              bytes,
+              mimeType: 'image/png',
+              name: 'elsewhere-trip.png',
+            ),
+          ],
+          fileNameOverrides: const ['elsewhere-trip.png'],
           text: 'My next escape: ${trip!.to.city}, ${trip!.to.country}',
         ),
       );
@@ -257,26 +318,6 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
         fontSize: 10,
         letterSpacing: 2,
         fontWeight: FontWeight.w700,
-      ),
-    ),
-  );
-  Widget _chip(String text, bool selected, VoidCallback tap) => InkWell(
-    onTap: tap,
-    borderRadius: BorderRadius.circular(30),
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
-      decoration: BoxDecoration(
-        color: selected ? gold : Colors.transparent,
-        border: Border.all(color: selected ? gold : const Color(0xff344450)),
-        borderRadius: BorderRadius.circular(30),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: selected ? bg : muted,
-          fontSize: 12,
-          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-        ),
       ),
     ),
   );
@@ -327,7 +368,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                             letterSpacing: 2,
                           ),
                         ),
-                    if (width > 500)
+                        if (width > 500)
                           const Text(
                             'THE WORLD IS WAITING',
                             style: TextStyle(
@@ -386,7 +427,15 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                         Globe(
                           key: ValueKey(t?.to.code),
                           controller: globe,
-                          skin: GlobeSkins.midnight,
+                          theme: GlobeSkins.midnight.copyWith(
+                            atmosphere: const GlobeAtmosphereStyle(
+                              color: Color(0xff5aa7bb),
+                            ),
+                            surface: GlobeSkins.midnight.surface.copyWith(
+                              surfaceColor: const Color(0xff061624),
+                              pointOpacity: 0.01,
+                            ),
+                          ),
                           quality: GlobeQuality.auto,
                           autoRotate: t == null,
                           markers: t == null
@@ -409,32 +458,32 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                                     pulse: true,
                                   ),
                                 ],
-                          layers: t == null
-                              ? const []
-                              : [
-                                  GlobeRouteLayer(
-                                    routes: [
-                                      GlobeRoute(
-                                        waypoints: [
-                                          GlobeCoordinate(
-                                            latitude: t.from.lat,
-                                            longitude: t.from.lon,
-                                          ),
-                                          GlobeCoordinate(
-                                            latitude: t.to.lat,
-                                            longitude: t.to.lon,
-                                          ),
-                                        ],
-                                        color: gold,
-                                        vehicleColor: gold,
-                                        duration: const Duration(
-                                          milliseconds: 4400,
-                                        ),
-                                        repeat: false,
+                          layers: [
+                            if (earth != null) SatelliteLayer(earth!),
+                            if (t != null)
+                              GlobeRouteLayer(
+                                routes: [
+                                  GlobeRoute(
+                                    waypoints: [
+                                      GlobeCoordinate(
+                                        latitude: t.from.lat,
+                                        longitude: t.from.lon,
+                                      ),
+                                      GlobeCoordinate(
+                                        latitude: t.to.lat,
+                                        longitude: t.to.lon,
                                       ),
                                     ],
+                                    color: gold,
+                                    vehicleColor: gold,
+                                    duration: const Duration(
+                                      milliseconds: 4400,
+                                    ),
+                                    repeat: false,
                                   ),
                                 ],
+                              ),
+                          ],
                         ),
                         Align(
                           alignment: Alignment.bottomCenter,
@@ -514,49 +563,6 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                               ],
                             ),
                           ),
-                        _label('LEAVING WITHIN'),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final h in [12, 24, 48])
-                              _chip(
-                                '$h hours',
-                                hours == h,
-                                () => setState(() => hours = h),
-                              ),
-                          ],
-                        ),
-                        _label('WHERE TO?'),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final r in ['Anywhere', 'Domestic', 'Abroad'])
-                              _chip(
-                                r,
-                                region == r,
-                                () => setState(() => region = r),
-                              ),
-                          ],
-                        ),
-                        _label('TICKET'),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _chip(
-                              'Round trip',
-                              kind == 'round-trip',
-                              () => setState(() => kind = 'round-trip'),
-                            ),
-                            _chip(
-                              'One way',
-                              kind == 'one-way',
-                              () => setState(() => kind = 'one-way'),
-                            ),
-                          ],
-                        ),
                         const SizedBox(height: 28),
                         _button(
                           busy ? 'SEARCHING...' : '✦   SURPRISE ME',
@@ -573,7 +579,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                       ],
                     ),
                   ),
-                  if (t != null) _result(t),
+                  if (t != null && revealed) _result(t),
                   const Padding(
                     padding: EdgeInsets.all(35),
                     child: Center(
@@ -615,16 +621,12 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (!imageFailed)
-                    Image.network(
-                      t.to.photoUrl,
+                  if ((attractions[t.to.city] ?? []).isNotEmpty)
+                    Image.asset(
+                      attractions[t.to.city]![activePhoto %
+                              attractions[t.to.city]!.length]
+                          .asset,
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) setState(() => imageFailed = true);
-                        });
-                        return const ColoredBox(color: Color(0xff305b68));
-                      },
                     )
                   else
                     const ColoredBox(color: Color(0xff305b68)),
@@ -672,6 +674,106 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                 ],
               ),
             ),
+            if ((attractions[t.to.city] ?? []).isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'EXPLORE THE LANDMARKS',
+                      style: TextStyle(
+                        color: gold,
+                        fontSize: 10,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 160,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          for (
+                            var i = 0;
+                            i < attractions[t.to.city]!.length;
+                            i++
+                          )
+                            MouseRegion(
+                              onEnter: (_) => setState(() => activePhoto = i),
+                              child: GestureDetector(
+                                onTap: () => setState(() => activePhoto = i),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 250),
+                                  width: activePhoto == i ? 220 : 132,
+                                  margin: const EdgeInsets.only(right: 8),
+                                  clipBehavior: Clip.antiAlias,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.asset(
+                                        attractions[t.to.city]![i].asset,
+                                        fit: BoxFit.cover,
+                                      ),
+                                      const DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: [
+                                              Colors.transparent,
+                                              Color(0xcc000000),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        left: 10,
+                                        right: 10,
+                                        bottom: 10,
+                                        child: Text(
+                                          attractions[t.to.city]![i].title,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Photo: ${attractions[t.to.city]![activePhoto % attractions[t.to.city]!.length].author} · ${attractions[t.to.city]![activePhoto % attractions[t.to.city]!.length].license}',
+                      style: const TextStyle(color: muted, fontSize: 10),
+                    ),
+                    TextButton(
+                      onPressed: () => launchUrl(
+                        Uri.parse(
+                          attractions[t.to.city]![activePhoto %
+                                  attractions[t.to.city]!.length]
+                              .source,
+                        ),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: const Text(
+                        'PHOTO & LICENSE ↗',
+                        style: TextStyle(color: gold, fontSize: 10),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.all(22),
               child: Column(
@@ -734,7 +836,47 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                       ),
                     ),
                   const SizedBox(height: 24),
-                  _button('FIND FLIGHTS  ↗', _openFlights),
+                  const Text(
+                    'SKYSCANNER INDICATIVE LOW FARE',
+                    style: TextStyle(
+                      color: gold,
+                      fontSize: 10,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  Text(
+                    fareLoading
+                        ? 'Checking Skyscanner…'
+                        : skyscannerFare == null
+                        ? 'Unavailable — partner access required'
+                        : _money(
+                            skyscannerFare!.amount,
+                            skyscannerFare!.currency,
+                          ),
+                    style: const TextStyle(color: Colors.white, fontSize: 24),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    skyscannerFare == null
+                        ? 'No Skyscanner price was returned. No sample fare is shown.'
+                        : 'Lowest recently seen for ${skyscannerFare!.date} · 1 adult economy. Cached price, not a live ticket offer.',
+                    style: const TextStyle(color: muted, fontSize: 11),
+                  ),
+                  if (skyscannerFare != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: InkWell(
+                        onTap: () => launchUrl(
+                          Uri.parse('https://www.skyscanner.net'),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                        child: Image.asset(
+                          'assets/skyscanner-powered-by.png',
+                          width: 150,
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -757,7 +899,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                   ),
                   const SizedBox(height: 20),
                   const Text(
-                    'Destination imagery: Unsplash',
+                    'Earth: NASA Blue Marble · Photos: Wikimedia Commons',
                     style: TextStyle(color: muted, fontSize: 10),
                   ),
                 ],
