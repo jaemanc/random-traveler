@@ -31,7 +31,7 @@ class Elsewhere extends StatelessWidget {
 }
 
 class Flight {
-  Flight.fromJson(Map<String, dynamic> j)
+  Flight.fromJson(Map<String, dynamic> j, this.cached)
     : airline = j['airline'] ?? '',
       depart = j['depart'] ?? '',
       arrive = j['arrive'] ?? '',
@@ -39,24 +39,18 @@ class Flight {
       amount = (j['amount'] as num).toDouble(),
       currency = j['currency'] ?? 'USD',
       checkedAt = j['checkedAt'] ?? '',
-      kind = j['kind'] ?? 'one-way';
+      kind = j['kind'] ?? 'one-way',
+      via = (j['via'] as List? ?? []).cast<String>();
   final String airline, depart, arrive, duration, currency, checkedAt, kind;
   final double amount;
+  final bool cached;
+  final List<String> via;
 }
 
 class Trip {
   Trip(this.from, this.to, this.flight);
   final Place from, to;
   final Flight? flight;
-}
-
-class SkyscannerFare {
-  SkyscannerFare.fromJson(Map<String, dynamic> j)
-    : amount = (j['amount'] as num).toDouble(),
-      currency = j['currency'] as String,
-      date = j['date'] as String;
-  final double amount;
-  final String currency, date;
 }
 
 class Attraction {
@@ -78,11 +72,10 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
   Place? origin;
   Trip? trip;
-  bool manual = false, busy = false, revealed = false, fareLoading = false;
+  bool manual = false, busy = false, revealed = false;
   int revealVersion = 0, activePhoto = 0;
   String notice = '';
   ui.Image? earth;
-  SkyscannerFare? skyscannerFare;
   Map<String, List<Attraction>> attractions = {};
   final capture = ScreenshotController();
   late final GlobeController globe = GlobeController(autoRotate: false);
@@ -185,7 +178,6 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
       trip = null;
       notice = '';
       revealed = false;
-      skyscannerFare = null;
       activePhoto = 0;
     });
     final version = ++revealVersion;
@@ -231,7 +223,11 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
             }
             final data = jsonDecode(response.body) as Map<String, dynamic>;
             if (data['flight'] != null) {
-              found = Trip(airport, to, Flight.fromJson(data['flight']));
+              found = Trip(
+                airport,
+                to,
+                Flight.fromJson(data['flight'], data['cached'] == true),
+              );
               break;
             }
           } catch (_) {
@@ -253,34 +249,9 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
       }
     });
     _fly(found.from, found.to, version);
-    _loadSkyscanner(found);
     Future.delayed(const Duration(milliseconds: 4500), () {
       if (mounted && revealVersion == version) setState(() => revealed = true);
     });
-  }
-
-  Future<void> _loadSkyscanner(Trip t) async {
-    if (api.isEmpty) return;
-    setState(() => fareLoading = true);
-    try {
-      final uri = Uri.parse(api).replace(
-        queryParameters: {
-          'provider': 'skyscanner',
-          'origin': t.from.code,
-          'destination': t.to.code,
-          'hours': '12',
-          'kind': 'round-trip',
-        },
-      );
-      final response = await http.get(uri).timeout(const Duration(seconds: 20));
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      if (mounted && trip == t && data['fare'] != null) {
-        setState(() => skyscannerFare = SkyscannerFare.fromJson(data['fare']));
-      }
-    } catch (_) {
-      /* Price remains unavailable. */
-    }
-    if (mounted && trip == t) setState(() => fareLoading = false);
   }
 
   Future<void> _share() async {
@@ -782,6 +753,8 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                   Text(
                     t.flight == null
                         ? 'SAMPLE DESTINATION · NO LIVE FARE'
+                        : t.flight!.cached
+                        ? 'CACHED OFFER · PRICE MAY CHANGE'
                         : 'LIVE OFFER · PRICE MAY CHANGE',
                     style: const TextStyle(
                       color: gold,
@@ -808,8 +781,11 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                       'Travel time: ${f.duration}',
                       style: const TextStyle(color: muted),
                     ),
+                    Text(
+                      f.via.isEmpty ? 'Nonstop' : 'Via ${f.via.join(', ')}',
+                      style: const TextStyle(color: muted),
+                    ),
                     const Divider(height: 35),
-                    _cost('Flight fare', _money(f.amount, f.currency)),
                     _cost(
                       'Local budget · 3 days, estimate',
                       '≈ ${_money(t.to.daily * 3)}',
@@ -837,7 +813,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                     ),
                   const SizedBox(height: 24),
                   const Text(
-                    'SKYSCANNER INDICATIVE LOW FARE',
+                    'LOWEST FARE FOUND',
                     style: TextStyle(
                       color: gold,
                       fontSize: 10,
@@ -846,37 +822,18 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                   ),
                   const SizedBox(height: 9),
                   Text(
-                    fareLoading
-                        ? 'Checking Skyscanner…'
-                        : skyscannerFare == null
-                        ? 'Unavailable — partner access required'
-                        : _money(
-                            skyscannerFare!.amount,
-                            skyscannerFare!.currency,
-                          ),
+                    t.flight == null
+                        ? 'Unavailable in sample mode'
+                        : _money(t.flight!.amount, t.flight!.currency),
                     style: const TextStyle(color: Colors.white, fontSize: 24),
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    skyscannerFare == null
-                        ? 'No Skyscanner price was returned. No sample fare is shown.'
-                        : 'Lowest recently seen for ${skyscannerFare!.date} · 1 adult economy. Cached price, not a live ticket offer.',
+                    t.flight == null
+                        ? 'No flight price was returned. No sample fare is shown.'
+                        : '${t.flight!.cached ? 'Duffel cache' : 'Duffel live search'} · Checked ${_date(t.flight!.checkedAt)} UTC · Price may change.',
                     style: const TextStyle(color: muted, fontSize: 11),
                   ),
-                  if (skyscannerFare != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 14),
-                      child: InkWell(
-                        onTap: () => launchUrl(
-                          Uri.parse('https://www.skyscanner.net'),
-                          mode: LaunchMode.externalApplication,
-                        ),
-                        child: Image.asset(
-                          'assets/skyscanner-powered-by.png',
-                          width: 150,
-                        ),
-                      ),
-                    ),
                   const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,

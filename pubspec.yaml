@@ -21,6 +21,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/earth-blue-marble.jpg
-    - assets/skyscanner-powered-by.png
     - assets/attractions.json
     - assets/attractions/
