@@ -7,21 +7,16 @@ class SatelliteLayer extends GlobeLayer {
   SatelliteLayer(this.image) : super(zIndex: 15);
   final ui.Image image;
   static final _mesh = [
-    for (var y = 0; y < 24; y++)
-      for (var x = 0; x < 48; x++)
-        [
-          _vertex(x, y),
-          _vertex(x + 1, y),
-          _vertex(x, y + 1),
-          _vertex(x + 1, y),
-          _vertex(x + 1, y + 1),
-          _vertex(x, y + 1),
-        ],
+    for (var y = 0; y < 32; y++)
+      for (var x = 0; x < 64; x++) ...[
+        [_vertex(x, y), _vertex(x + 1, y), _vertex(x, y + 1)],
+        [_vertex(x + 1, y), _vertex(x + 1, y + 1), _vertex(x, y + 1)],
+      ],
   ];
   static (Vector3D, Offset) _vertex(int x, int y) {
-    final lat = 90 - y * 180 / 24;
-    final lon = -180 + x * 360 / 48;
-    return (Vector3D.fromDegrees(lat, lon), Offset(x / 48, y / 24));
+    final lat = 90 - y * 180 / 32;
+    final lon = -180 + x * 360 / 64;
+    return (Vector3D.fromDegrees(lat, lon), Offset(x / 64, y / 32));
   }
 
   @override

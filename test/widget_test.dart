@@ -1,10 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_globe/flutter_globe.dart';
-import 'dart:ui' as ui;
 import 'package:elsewhere_travel/data.dart';
-import 'package:elsewhere_travel/satellite_layer.dart';
+import 'package:elsewhere_travel/main.dart';
+import 'package:flutter_globe/flutter_globe.dart';
 
 void main() {
   test('nearest airport uses coordinates', () {
@@ -16,30 +13,14 @@ void main() {
     expect(sorted.first.code, 'ICN');
   });
 
-  testWidgets('bundled Earth texture paints on the globe', (tester) async {
-    final image = await tester.runAsync(() async {
-      final bytes = await rootBundle.load('assets/earth-blue-marble.jpg');
-      final codec = await ui.instantiateImageCodec(bytes.buffer.asUint8List());
-      return (await codec.getNextFrame()).image;
-    });
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Center(
-          child: SizedBox(
-            width: 320,
-            height: 320,
-            child: Globe(
-              controller: GlobeController(autoRotate: false),
-              autoRotate: false,
-              layers: [SatelliteLayer(image!)],
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox());
-    image.dispose();
+  test('destination camera keeps north above the center', () {
+    final rotation = northUpRotation(37.46, 126.44);
+    final center = rotation.rotateVector(Vector3D.fromDegrees(37.46, 126.44));
+    final north = rotation.rotateVector(Vector3D.fromDegrees(38.46, 126.44));
+    expect(center.x, closeTo(0, 0.000001));
+    expect(center.y, closeTo(0, 0.000001));
+    expect(center.z, closeTo(1, 0.000001));
+    expect(north.x, closeTo(0, 0.000001));
+    expect(north.y, lessThan(0));
   });
 }

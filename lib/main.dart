@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_globe/flutter_globe.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,14 +11,17 @@ import 'package:http/http.dart' as http;
 import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
 import 'data.dart';
+import 'home_ui.dart';
 import 'satellite_layer.dart';
 
-const gold = Color(0xffeac58d),
-    bg = Color(0xff08121c),
-    panel = Color(0xff0d1b29),
-    muted = Color(0xff9caebc);
+const gold = primaryBlue, panel = Color(0xfff8fbff), muted = secondaryText;
 const api = String.fromEnvironment('FLIGHTS_API_URL');
 void main() => runApp(const Elsewhere());
+
+Quaternion3D northUpRotation(double lat, double lon) =>
+    (Quaternion3D.fromAxisAngle(Vector3D.unitX, -lat * pi / 180) *
+            Quaternion3D.fromAxisAngle(Vector3D.unitY, -lon * pi / 180))
+        .normalized;
 
 class Elsewhere extends StatelessWidget {
   const Elsewhere({super.key});
@@ -25,7 +29,7 @@ class Elsewhere extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     title: 'Elsewhere',
-    theme: ThemeData.dark().copyWith(scaffoldBackgroundColor: bg),
+    theme: elsewhereTheme,
     home: const Home(),
   );
 }
@@ -69,16 +73,23 @@ class Home extends StatefulWidget {
   State<Home> createState() => _HomeState();
 }
 
-class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
+class _HomeState extends State<Home> with TickerProviderStateMixin {
   Place? origin;
   Trip? trip;
   bool manual = false, busy = false, revealed = false;
   int revealVersion = 0, activePhoto = 0;
+  bool cameraInterrupted = false;
+  AnimationController? cameraFlight;
   String notice = '';
   ui.Image? earth;
   Map<String, List<Attraction>> attractions = {};
   final capture = ScreenshotController();
-  late final GlobeController globe = GlobeController(autoRotate: false);
+  final fareSection = GlobalKey();
+  final attractionSection = GlobalKey();
+  late final GlobeController globe = GlobeController(
+    autoRotate: false,
+    initialRotation: northUpRotation(0, 0),
+  );
   @override
   void initState() {
     super.initState();
@@ -88,6 +99,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
 
   @override
   void dispose() {
+    cameraFlight?.dispose();
     earth?.dispose();
     globe.dispose();
     super.dispose();
@@ -142,29 +154,40 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
           ).compareTo(distance(pos.latitude, pos.longitude, b)),
         );
       setState(() => origin = sorted.first);
-      globe.lookAt(
-        GlobeCoordinate(
-          latitude: sorted.first.lat,
-          longitude: sorted.first.lon,
-        ),
-      );
+      globe.rotation = northUpRotation(sorted.first.lat, sorted.first.lon);
     } catch (_) {
       setState(() => manual = true);
     }
   }
 
   void _fly(Place from, Place to, int version) {
-    globe.lookAt(GlobeCoordinate(latitude: from.lat, longitude: from.lon));
+    cameraFlight?.dispose();
+    cameraFlight = null;
+    cameraInterrupted = false;
+    globe.rotation = northUpRotation(from.lat, from.lon);
+    globe.zoom = 1;
     Future.delayed(const Duration(milliseconds: 1800), () {
-      if (mounted && revealVersion == version) {
-        globe.animateTo(
-          coordinate: GlobeCoordinate(latitude: to.lat, longitude: to.lon),
-          vsync: this,
-          duration: const Duration(milliseconds: 2600),
-          zoom: 1.25,
-        );
-      }
+      if (!mounted || revealVersion != version || cameraInterrupted) return;
+      final start = globe.rotation;
+      final end = northUpRotation(to.lat, to.lon);
+      final animation = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 2600),
+      );
+      cameraFlight = animation;
+      animation.addListener(() {
+        final progress = Curves.easeInOutCubic.transform(animation.value);
+        globe.rotation = start.slerp(end, progress);
+        globe.zoom = 1 + 0.25 * progress;
+      });
+      animation.forward();
     });
+  }
+
+  void _zoom(double factor) {
+    cameraInterrupted = true;
+    cameraFlight?.stop();
+    globe.zoom = (globe.zoom * factor).clamp(0.5, 3.5).toDouble();
   }
 
   List<Place> get destinations => places
@@ -254,6 +277,26 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
     });
   }
 
+  void _selectDestination(Place to) {
+    if (busy) return;
+    final from = origin;
+    if (from == null) {
+      setState(() => notice = 'Choose a departure airport first.');
+      return;
+    }
+    final version = ++revealVersion;
+    setState(() {
+      trip = Trip(from, to, null);
+      revealed = false;
+      activePhoto = 0;
+      notice = 'Destination preview · no live fare';
+    });
+    _fly(from, to, version);
+    Future.delayed(const Duration(milliseconds: 4500), () {
+      if (mounted && revealVersion == version) setState(() => revealed = true);
+    });
+  }
+
   Future<void> _share() async {
     try {
       final bytes = await capture.capture(pixelRatio: 2);
@@ -280,25 +323,13 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
       '${currency == 'USD' ? '\$' : '$currency '}${n.round()}';
   String _date(String x) =>
       x.replaceFirst('T', '  ').substring(0, min(16, x.length));
-  Widget _label(String t) => Padding(
-    padding: const EdgeInsets.only(top: 23, bottom: 10),
-    child: Text(
-      t,
-      style: const TextStyle(
-        color: muted,
-        fontSize: 10,
-        letterSpacing: 2,
-        fontWeight: FontWeight.w700,
-      ),
-    ),
-  );
   Widget _button(String text, VoidCallback? tap) => SizedBox(
     width: double.infinity,
     child: ElevatedButton(
       onPressed: tap,
       style: ElevatedButton.styleFrom(
         backgroundColor: gold,
-        foregroundColor: bg,
+        foregroundColor: Colors.white,
         padding: const EdgeInsets.all(18),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
@@ -313,282 +344,711 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
     ),
   );
   @override
-  Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    final t = trip;
-    return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 700),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          '✦  ELSEWHERE',
-                          style: TextStyle(
-                            color: gold,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                        if (width > 500)
-                          const Text(
-                            'THE WORLD IS WAITING',
-                            style: TextStyle(
-                              color: muted,
-                              fontSize: 9,
-                              letterSpacing: 2,
+  Widget build(BuildContext context) => Scaffold(
+    body: Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xffeaf5ff), Color(0xffdceeff), Color(0xfff8fbff)],
+        ),
+      ),
+      child: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final wide = width >= 1100;
+            final tablet = width >= 600;
+            final t = trip;
+            final visualHeight = wide
+                ? 540.0
+                : tablet
+                ? 450.0
+                : min(width - 32, 390.0);
+            final globeSection = SizedBox(
+              height: visualHeight,
+              child: _globeView(t),
+            );
+            final previewSection = SizedBox(
+              height: wide
+                  ? 540
+                  : tablet
+                  ? 450
+                  : 420,
+              child:
+                  t != null &&
+                      revealed &&
+                      (attractions[t.to.city] ?? []).isNotEmpty
+                  ? _photoPreview(t)
+                  : GlassCard(
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.explore_outlined,
+                              size: 54,
+                              color: primaryBlue,
                             ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(24, 38, 24, 0),
-                    child: Text(
-                      'A LITTLE SPONTANEITY',
-                      style: TextStyle(
-                        color: gold,
-                        fontSize: 10,
-                        letterSpacing: 3,
-                      ),
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(24, 12, 24, 0),
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(text: 'Go somewhere\n'),
-                          TextSpan(
-                            text: 'unexpected.',
-                            style: TextStyle(
-                              color: gold,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ],
-                      ),
-                      style: TextStyle(
-                        fontSize: 48,
-                        fontWeight: FontWeight.w300,
-                        height: 1.1,
-                      ),
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(24, 14, 24, 0),
-                    child: Text(
-                      'One tap. A new horizon. Your next story starts here.',
-                      style: TextStyle(color: muted, fontSize: 14),
-                    ),
-                  ),
-                  SizedBox(
-                    height: 330,
-                    child: Stack(
-                      children: [
-                        Globe(
-                          key: ValueKey(t?.to.code),
-                          controller: globe,
-                          theme: GlobeSkins.midnight.copyWith(
-                            atmosphere: const GlobeAtmosphereStyle(
-                              color: Color(0xff5aa7bb),
-                            ),
-                            surface: GlobeSkins.midnight.surface.copyWith(
-                              surfaceColor: const Color(0xff061624),
-                              pointOpacity: 0.01,
-                            ),
-                          ),
-                          quality: GlobeQuality.auto,
-                          autoRotate: t == null,
-                          markers: t == null
-                              ? const []
-                              : [
-                                  GlobeMarker(
-                                    coordinate: GlobeCoordinate(
-                                      latitude: t.from.lat,
-                                      longitude: t.from.lon,
-                                    ),
-                                    label: t.from.code,
-                                    pulse: true,
-                                  ),
-                                  GlobeMarker(
-                                    coordinate: GlobeCoordinate(
-                                      latitude: t.to.lat,
-                                      longitude: t.to.lon,
-                                    ),
-                                    label: t.to.code,
-                                    pulse: true,
-                                  ),
-                                ],
-                          layers: [
-                            if (earth != null) SatelliteLayer(earth!),
-                            if (t != null)
-                              GlobeRouteLayer(
-                                routes: [
-                                  GlobeRoute(
-                                    waypoints: [
-                                      GlobeCoordinate(
-                                        latitude: t.from.lat,
-                                        longitude: t.from.lon,
-                                      ),
-                                      GlobeCoordinate(
-                                        latitude: t.to.lat,
-                                        longitude: t.to.lon,
-                                      ),
-                                    ],
-                                    color: gold,
-                                    vehicleColor: gold,
-                                    duration: const Duration(
-                                      milliseconds: 4400,
-                                    ),
-                                    repeat: false,
-                                  ),
-                                ],
+                            const SizedBox(height: 20),
+                            Text(
+                              t == null
+                                  ? 'Your next escape awaits'
+                                  : 'Finding your destination...',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
                               ),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text(
+                              'A new place is one tap away.',
+                              style: TextStyle(color: muted),
+                            ),
                           ],
                         ),
-                        Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 20),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 17,
-                              vertical: 9,
-                            ),
-                            decoration: BoxDecoration(
-                              color: panel,
-                              border: Border.all(color: muted),
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                            child: Text(
-                              t == null
-                                  ? 'YOUR NEXT JOURNEY'
-                                  : '${t.from.code}  →  ${t.to.code}',
-                              style: const TextStyle(
-                                color: gold,
-                                fontSize: 10,
-                                letterSpacing: 2,
-                              ),
-                            ),
+                      ),
+                    ),
+            );
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                tablet ? 24 : 16,
+                16,
+                tablet ? 24 : 16,
+                36,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1450),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _header(tablet),
+                      const SizedBox(height: 28),
+                      if (wide)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(flex: 4, child: _heroCopy(true)),
+                            Expanded(flex: 7, child: globeSection),
+                            const SizedBox(width: 20),
+                            Expanded(flex: 5, child: previewSection),
+                          ],
+                        )
+                      else ...[
+                        _heroCopy(false),
+                        const SizedBox(height: 16),
+                        if (width >= 850)
+                          Row(
+                            children: [
+                              Expanded(flex: 6, child: globeSection),
+                              const SizedBox(width: 16),
+                              Expanded(flex: 4, child: previewSection),
+                            ],
+                          )
+                        else ...[
+                          globeSection,
+                          const SizedBox(height: 16),
+                          previewSection,
+                        ],
+                      ],
+                      const SizedBox(height: 20),
+                      if (wide)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(flex: 7, child: _controls()),
+                            const SizedBox(width: 20),
+                            Expanded(flex: 4, child: _surpriseCard()),
+                          ],
+                        )
+                      else ...[
+                        _controls(),
+                        const SizedBox(height: 16),
+                        _surpriseCard(),
+                      ],
+                      const SizedBox(height: 18),
+                      _shortcuts(),
+                      if (t != null && revealed) _result(t),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    ),
+  );
+
+  Widget _header(bool tablet) => Row(
+    children: [
+      const Icon(Icons.auto_awesome, color: primaryBlue, size: 30),
+      const SizedBox(width: 8),
+      const Text(
+        'Elsewhere',
+        style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+      ),
+      const Spacer(),
+      if (tablet) ...[
+        const Chip(
+          label: Text('Explore'),
+          avatar: Icon(Icons.home_outlined, size: 18),
+          backgroundColor: Color(0xffcfe3ff),
+          side: BorderSide.none,
+        ),
+        const SizedBox(width: 10),
+        const Text(
+          'Trips',
+          style: TextStyle(color: muted, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(width: 24),
+        const Text(
+          'Saved',
+          style: TextStyle(color: muted, fontWeight: FontWeight.w600),
+        ),
+      ],
+    ],
+  );
+
+  Widget _heroCopy(bool wide) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'A LITTLE SPONTANEITY',
+        style: TextStyle(color: muted, fontSize: 11, letterSpacing: 2.5),
+      ),
+      const SizedBox(height: 18),
+      Text.rich(
+        const TextSpan(
+          children: [
+            TextSpan(text: 'Go somewhere\n'),
+            TextSpan(
+              text: 'unexpected.',
+              style: TextStyle(color: primaryBlue, fontStyle: FontStyle.italic),
+            ),
+          ],
+        ),
+        style: TextStyle(
+          fontSize: wide && MediaQuery.sizeOf(context).width < 1280
+              ? 34
+              : wide
+              ? 43
+              : 38,
+          height: 1.12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 20),
+      const Text(
+        'Discover a new place. Let the world surprise you.',
+        style: TextStyle(color: muted, fontSize: 16, height: 1.5),
+      ),
+    ],
+  );
+
+  Widget _controls() => GlassCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 570;
+            final airport = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'DEPARTING FROM',
+                  style: TextStyle(
+                    color: muted,
+                    fontSize: 11,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                InkWell(
+                  onTap: () => setState(() => manual = !manual),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.flight_takeoff, color: primaryBlue),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          origin == null
+                              ? 'Choose an airport'
+                              : '${origin!.city} · ${origin!.code}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 17,
                           ),
                         ),
-                      ],
+                      ),
+                      const Icon(Icons.keyboard_arrow_down, color: primaryBlue),
+                    ],
+                  ),
+                ),
+              ],
+            );
+            final destination = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'WHERE TO?',
+                  style: TextStyle(
+                    color: muted,
+                    fontSize: 11,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+                Autocomplete<Place>(
+                  displayStringForOption: (p) => '${p.city}, ${p.country}',
+                  optionsBuilder: (value) {
+                    final query = value.text.trim().toLowerCase();
+                    if (query.isEmpty) return const Iterable<Place>.empty();
+                    return places
+                        .where(
+                          (p) =>
+                              p.code != origin?.code &&
+                              ('${p.city} ${p.country} ${p.code}')
+                                  .toLowerCase()
+                                  .contains(query),
+                        )
+                        .take(8);
+                  },
+                  onSelected: _selectDestination,
+                  fieldViewBuilder:
+                      (context, controller, focusNode, onSubmitted) =>
+                          TextField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            decoration: InputDecoration(
+                              hintText: 'Search a city or country',
+                              border: InputBorder.none,
+                              isDense: true,
+                              prefixIcon: const Icon(
+                                Icons.place_outlined,
+                                color: primaryBlue,
+                              ),
+                              suffixIcon: IconButton(
+                                tooltip: 'Preview destination',
+                                icon: const Icon(
+                                  Icons.arrow_forward,
+                                  color: primaryBlue,
+                                ),
+                                onPressed: () {
+                                  final query = controller.text
+                                      .trim()
+                                      .toLowerCase();
+                                  final matches = places.where(
+                                    (p) =>
+                                        p.code != origin?.code &&
+                                        ('${p.city} ${p.country} ${p.code}')
+                                            .toLowerCase()
+                                            .contains(query),
+                                  );
+                                  if (query.isNotEmpty && matches.isNotEmpty) {
+                                    _selectDestination(matches.first);
+                                  } else {
+                                    setState(
+                                      () => notice = 'No matching destination.',
+                                    );
+                                  }
+                                },
+                              ),
+                            ),
+                            onSubmitted: (_) => onSubmitted(),
+                          ),
+                ),
+              ],
+            );
+            return wide
+                ? Row(
+                    children: [
+                      Expanded(child: airport),
+                      const SizedBox(width: 24),
+                      Expanded(child: destination),
+                    ],
+                  )
+                : Column(
+                    children: [
+                      airport,
+                      const SizedBox(height: 18),
+                      destination,
+                    ],
+                  );
+          },
+        ),
+        if (manual)
+          SizedBox(
+            height: 205,
+            child: ListView(
+              children: [
+                for (final p in places)
+                  Material(
+                    color: Colors.transparent,
+                    child: ListTile(
+                      dense: true,
+                      title: Text('${p.city}  ${p.code}'),
+                      onTap: () {
+                        setState(() {
+                          origin = p;
+                          manual = false;
+                        });
+                        cameraInterrupted = true;
+                        cameraFlight?.stop();
+                        globe.rotation = northUpRotation(p.lat, p.lon);
+                      },
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
+              ],
+            ),
+          ),
+        if (notice.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(
+              notice,
+              style: const TextStyle(color: primaryBlue, fontSize: 12),
+            ),
+          ),
+      ],
+    ),
+  );
+
+  Widget _surpriseCard() => GlassCard(
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '✦  Surprise Me',
+                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Not sure where to go? Let chance choose.',
+                style: TextStyle(color: muted),
+              ),
+              const SizedBox(height: 14),
+              _button(
+                busy ? 'SEARCHING...' : 'SURPRISE ME',
+                origin == null || busy ? null : _surprise,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        const Icon(Icons.travel_explore, size: 54, color: primaryBlue),
+      ],
+    ),
+  );
+
+  Widget _shortcuts() => Wrap(
+    spacing: 12,
+    runSpacing: 12,
+    children: [
+      _Shortcut(Icons.flight_outlined, 'Flights', _jumpTo(fareSection)),
+      const _Shortcut(Icons.hotel_outlined, 'Stays', null),
+      _Shortcut(
+        Icons.local_activity_outlined,
+        'Attractions',
+        _jumpTo(attractionSection),
+      ),
+      const _Shortcut(Icons.directions_car_outlined, 'Transport', null),
+    ],
+  );
+
+  VoidCallback? _jumpTo(GlobalKey key) {
+    if (!revealed ||
+        (key == attractionSection &&
+            (attractions[trip?.to.city] ?? []).isEmpty)) {
+      return null;
+    }
+    return () {
+      final context = key.currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(
+          context,
+          duration: const Duration(milliseconds: 350),
+        );
+      }
+    };
+  }
+
+  Widget _globeView(Trip? t) => ClipRect(
+    child: Stack(
+      children: [
+        Positioned.fill(
+          child: Listener(
+            onPointerSignal: (event) {
+              if (event is PointerScrollEvent) {
+                GestureBinding.instance.pointerSignalResolver.register(event, (
+                  _,
+                ) {
+                  _zoom(event.scrollDelta.dy > 0 ? 0.88 : 1.12);
+                });
+              }
+            },
+            child: Globe(
+              key: ValueKey(t?.to.code),
+              controller: globe,
+              theme: GlobeSkins.midnight.copyWith(
+                atmosphere: const GlobeAtmosphereStyle(
+                  color: Color(0xffa6c9d3),
+                  altitude: 0.08,
+                  glowIntensity: 0.2,
+                  innerShadowIntensity: 0.08,
+                ),
+                surface: GlobeSkins.midnight.surface.copyWith(
+                  surfaceColor: const Color(0xff061624),
+                  pointOpacity: 0,
+                ),
+              ),
+              radiusMultiplier: 0.9,
+              enableZoom: true,
+              onInteractionStart: () {
+                cameraInterrupted = true;
+                cameraFlight?.stop();
+              },
+              quality: GlobeQuality.auto,
+              autoRotate: t == null,
+              markers: t == null
+                  ? const []
+                  : [
+                      GlobeMarker(
+                        coordinate: GlobeCoordinate(
+                          latitude: t.from.lat,
+                          longitude: t.from.lon,
+                        ),
+                        label: t.from.code,
+                        pulse: true,
+                      ),
+                      GlobeMarker(
+                        coordinate: GlobeCoordinate(
+                          latitude: t.to.lat,
+                          longitude: t.to.lon,
+                        ),
+                        label: t.to.code,
+                        pulse: true,
+                      ),
+                    ],
+              layers: [
+                if (earth != null) SatelliteLayer(earth!),
+                if (t != null)
+                  GlobeRouteLayer(
+                    routes: [
+                      GlobeRoute(
+                        waypoints: [
+                          GlobeCoordinate(
+                            latitude: t.from.lat,
+                            longitude: t.from.lon,
+                          ),
+                          GlobeCoordinate(
+                            latitude: t.to.lat,
+                            longitude: t.to.lon,
+                          ),
+                        ],
+                        color: gold,
+                        vehicleColor: gold,
+                        duration: const Duration(milliseconds: 4400),
+                        repeat: false,
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          top: 12,
+          right: 12,
+          child: Column(
+            children: [
+              IconButton.filledTonal(
+                tooltip: 'Zoom in',
+                onPressed: () => _zoom(1.25),
+                icon: const Icon(Icons.add),
+              ),
+              IconButton.filledTonal(
+                tooltip: 'Zoom out',
+                onPressed: () => _zoom(0.8),
+                icon: const Icon(Icons.remove),
+              ),
+            ],
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 9),
+            decoration: BoxDecoration(
+              color: panel,
+              border: Border.all(color: muted),
+              borderRadius: BorderRadius.circular(30),
+            ),
+            child: Text(
+              t == null
+                  ? 'YOUR NEXT JOURNEY'
+                  : '${t.from.code}  →  ${t.to.code}',
+              style: const TextStyle(
+                color: gold,
+                fontSize: 10,
+                letterSpacing: 2,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _photoPreview(Trip t) {
+    final photos = attractions[t.to.city]!;
+    final selected = photos[activePhoto % photos.length];
+    Widget thumbnail(int i) => MouseRegion(
+      onEnter: (_) => setState(() => activePhoto = i),
+      child: GestureDetector(
+        onTap: () => setState(() => activePhoto = i),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          margin: const EdgeInsets.all(3),
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(
+              color: activePhoto == i ? primaryBlue : Colors.white,
+              width: activePhoto == i ? 3 : 1,
+            ),
+          ),
+          child: Image.asset(photos[i].asset, fit: BoxFit.cover),
+        ),
+      ),
+    );
+    return GlassCard(
+      key: attractionSection,
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 280),
+                    child: Image.asset(
+                      selected.asset,
+                      key: ValueKey(selected.asset),
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Color(0xb8192f60)],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 20,
+                    right: 16,
+                    bottom: 18,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _label('DEPARTING FROM'),
-                        InkWell(
-                          onTap: () => setState(() => manual = !manual),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(17),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: const Color(0xff354553),
-                              ),
-                              borderRadius: BorderRadius.circular(13),
-                            ),
-                            child: Text(
-                              origin == null
-                                  ? 'Choose an airport'
-                                  : '${origin!.city} · ${origin!.code}     ⌄',
-                              style: const TextStyle(fontSize: 16),
-                            ),
+                        const Text(
+                          'DESTINATION PREVIEW',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            letterSpacing: 1.8,
                           ),
                         ),
-                        if (manual)
-                          SizedBox(
-                            height: 205,
-                            child: ListView(
-                              children: [
-                                for (final p in places)
-                                  ListTile(
-                                    dense: true,
-                                    title: Text('${p.city}  ${p.code}'),
-                                    onTap: () {
-                                      setState(() {
-                                        origin = p;
-                                        manual = false;
-                                      });
-                                      globe.lookAt(
-                                        GlobeCoordinate(
-                                          latitude: p.lat,
-                                          longitude: p.lon,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                              ],
-                            ),
+                        const SizedBox(height: 7),
+                        Text(
+                          t.to.city,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.w800,
                           ),
-                        const SizedBox(height: 28),
-                        _button(
-                          busy ? 'SEARCHING...' : '✦   SURPRISE ME',
-                          origin == null || busy ? null : _surprise,
                         ),
-                        if (notice.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 14),
-                            child: Text(
-                              notice,
-                              style: const TextStyle(color: gold, fontSize: 12),
-                            ),
+                        Text(
+                          t.to.country,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          selected.title,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
-                    ),
-                  ),
-                  if (t != null && revealed) _result(t),
-                  const Padding(
-                    padding: EdgeInsets.all(35),
-                    child: Center(
-                      child: Text(
-                        'GO LIGHT. GO FAR. GO NOW.',
-                        style: TextStyle(
-                          color: muted,
-                          fontSize: 10,
-                          letterSpacing: 3,
-                        ),
-                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ),
-        ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 150,
+            child: GridView.builder(
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: photos.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 3,
+                crossAxisSpacing: 3,
+                mainAxisExtent: 72,
+              ),
+              itemBuilder: (_, i) => thumbnail(i),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _result(Trip t) => Padding(
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.only(top: 24),
     child: Screenshot(
       controller: capture,
       child: Container(
         decoration: BoxDecoration(
           color: panel,
-          border: Border.all(color: const Color(0xff30404b)),
-          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white, width: 1.5),
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: [
+            BoxShadow(
+              color: primaryBlue.withValues(alpha: 0.08),
+              blurRadius: 30,
+              offset: const Offset(0, 12),
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
-              height: 360,
+              height: MediaQuery.sizeOf(context).width >= 900 ? 250 : 360,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -606,7 +1066,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, panel],
+                        colors: [Colors.transparent, Color(0xb8192f60)],
                       ),
                     ),
                   ),
@@ -619,22 +1079,25 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                         const Text(
                           'YOUR NEXT ESCAPE IS',
                           style: TextStyle(
-                            color: gold,
+                            color: Colors.white,
                             fontSize: 10,
                             letterSpacing: 3,
                           ),
                         ),
                         Text(
                           t.to.city,
-                          style: const TextStyle(
-                            fontSize: 54,
+                          style: TextStyle(
+                            fontSize: MediaQuery.sizeOf(context).width >= 900
+                                ? 40
+                                : 54,
                             fontWeight: FontWeight.w300,
+                            color: Colors.white,
                           ),
                         ),
                         Text(
                           t.to.country,
                           style: const TextStyle(
-                            color: gold,
+                            color: Colors.white,
                             fontSize: 15,
                             letterSpacing: 2,
                           ),
@@ -647,83 +1110,10 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
             ),
             if ((attractions[t.to.city] ?? []).isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'EXPLORE THE LANDMARKS',
-                      style: TextStyle(
-                        color: gold,
-                        fontSize: 10,
-                        letterSpacing: 2,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      height: 160,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          for (
-                            var i = 0;
-                            i < attractions[t.to.city]!.length;
-                            i++
-                          )
-                            MouseRegion(
-                              onEnter: (_) => setState(() => activePhoto = i),
-                              child: GestureDetector(
-                                onTap: () => setState(() => activePhoto = i),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 250),
-                                  width: activePhoto == i ? 220 : 132,
-                                  margin: const EdgeInsets.only(right: 8),
-                                  clipBehavior: Clip.antiAlias,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Image.asset(
-                                        attractions[t.to.city]![i].asset,
-                                        fit: BoxFit.cover,
-                                      ),
-                                      const DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            colors: [
-                                              Colors.transparent,
-                                              Color(0xcc000000),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                      Positioned(
-                                        left: 10,
-                                        right: 10,
-                                        bottom: 10,
-                                        child: Text(
-                                          attractions[t.to.city]![i].title,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
                     Text(
                       'Photo: ${attractions[t.to.city]![activePhoto % attractions[t.to.city]!.length].author} · ${attractions[t.to.city]![activePhoto % attractions[t.to.city]!.length].license}',
                       style: const TextStyle(color: muted, fontSize: 10),
@@ -812,9 +1202,10 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                       ),
                     ),
                   const SizedBox(height: 24),
-                  const Text(
+                  Text(
                     'LOWEST FARE FOUND',
-                    style: TextStyle(
+                    key: fareSection,
+                    style: const TextStyle(
                       color: gold,
                       fontSize: 10,
                       letterSpacing: 1.5,
@@ -825,7 +1216,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                     t.flight == null
                         ? 'Unavailable in sample mode'
                         : _money(t.flight!.amount, t.flight!.currency),
-                    style: const TextStyle(color: Colors.white, fontSize: 24),
+                    style: const TextStyle(color: navyText, fontSize: 24),
                   ),
                   const SizedBox(height: 5),
                   Text(
@@ -835,8 +1226,8 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
                     style: const TextStyle(color: muted, fontSize: 11),
                   ),
                   const SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
                     children: [
                       TextButton(
                         onPressed: _surprise,
@@ -882,6 +1273,23 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
           ),
         ),
       ],
+    ),
+  );
+}
+
+class _Shortcut extends StatelessWidget {
+  const _Shortcut(this.icon, this.label, this.onPressed);
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => GlassCard(
+    padding: const EdgeInsets.all(4),
+    child: TextButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon),
+      label: Text(label),
     ),
   );
 }
