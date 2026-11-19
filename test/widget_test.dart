@@ -1,3 +1,4 @@
+import 'package:elsewhere_travel/globe_overlays.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:elsewhere_travel/data.dart';
 import 'package:elsewhere_travel/main.dart';
@@ -13,8 +14,27 @@ void main() {
     expect(sorted.first.code, 'ICN');
   });
 
+  test('repeated diagonal drags cannot roll or flip the globe', () {
+    final controller = NorthUpGlobeController();
+    addTearDown(controller.dispose);
+    controller.rotation = northUpRotation(37.46, 126.44);
+    for (var i = 0; i < 50; i++) {
+      controller.rotateBy(0.2, 0.3);
+    }
+    final (lat, lon) = globeCenter(controller.rotation);
+    expect(lat, closeTo(37.46, 0.000001));
+    final north = controller.rotation.rotateVector(
+      Vector3D.fromDegrees(lat + 1, lon),
+    );
+    expect(north.x, closeTo(0, 0.000001));
+    expect(north.y, lessThan(0));
+  });
+
   test('destination camera keeps north above the center', () {
     final rotation = northUpRotation(37.46, 126.44);
+    final (lat, lon) = globeCenter(rotation);
+    expect(lat, closeTo(37.46, 0.000001));
+    expect(lon, closeTo(126.44, 0.000001));
     final center = rotation.rotateVector(Vector3D.fromDegrees(37.46, 126.44));
     final north = rotation.rotateVector(Vector3D.fromDegrees(38.46, 126.44));
     expect(center.x, closeTo(0, 0.000001));

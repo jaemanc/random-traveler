@@ -6,6 +6,16 @@ import 'package:flutter_globe/flutter_globe.dart';
 class SatelliteLayer extends GlobeLayer {
   SatelliteLayer(this.image) : super(zIndex: 15);
   final ui.Image image;
+  late final ui.ImageShader _shader = ui.ImageShader(
+    image,
+    ui.TileMode.clamp,
+    ui.TileMode.clamp,
+    Matrix4.identity().storage,
+    filterQuality: FilterQuality.medium,
+  );
+  (Quaternion3D, Offset, double)? _meshKey;
+  ui.Vertices? _vertices;
+
   static final _mesh = [
     for (var y = 0; y < 32; y++)
       for (var x = 0; x < 64; x++) ...[
@@ -28,35 +38,33 @@ class SatelliteLayer extends GlobeLayer {
       camera.radius,
       Paint()..color = const Color(0xff061624),
     );
-    final positions = <Offset>[];
-    final tex = <Offset>[];
-    for (final triangle in _mesh) {
-      final rotated = triangle
-          .map((v) => context.rotation.rotateVector(v.$1))
-          .toList();
-      if (rotated.any((v) => v.z < 0.02)) continue;
-      for (var i = 0; i < 3; i++) {
-        positions.add(camera.project(rotated[i]).offset);
-        tex.add(
-          Offset(
-            triangle[i].$2.dx * image.width,
-            triangle[i].$2.dy * image.height,
-          ),
-        );
+    final key = (context.rotation, camera.center, camera.radius);
+    if (_meshKey != key) {
+      _meshKey = key;
+      final positions = <Offset>[];
+      final tex = <Offset>[];
+      for (final triangle in _mesh) {
+        final a = context.rotation.rotateVector(triangle[0].$1);
+        final b = context.rotation.rotateVector(triangle[1].$1);
+        final c = context.rotation.rotateVector(triangle[2].$1);
+        if (a.z < 0.02 || b.z < 0.02 || c.z < 0.02) continue;
+        positions.add(camera.project(a).offset);
+        positions.add(camera.project(b).offset);
+        positions.add(camera.project(c).offset);
+        for (final (_, uv) in triangle) {
+          tex.add(Offset(uv.dx * image.width, uv.dy * image.height));
+        }
       }
+      _vertices = ui.Vertices(
+        ui.VertexMode.triangles,
+        positions,
+        textureCoordinates: tex,
+      );
     }
-    if (positions.isEmpty) return;
-    final shader = ui.ImageShader(
-      image,
-      ui.TileMode.clamp,
-      ui.TileMode.clamp,
-      Matrix4.identity().storage,
-      filterQuality: FilterQuality.medium,
-    );
     canvas.drawVertices(
-      ui.Vertices(ui.VertexMode.triangles, positions, textureCoordinates: tex),
+      _vertices!,
       ui.BlendMode.srcOver,
-      Paint()..shader = shader,
+      Paint()..shader = _shader,
     );
     canvas.drawCircle(
       camera.center,

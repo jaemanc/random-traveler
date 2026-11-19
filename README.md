@@ -9,3 +9,5 @@ Flight selection defaults to departure within 12 hours and a three-day round tri
 Amadeus Self-Service ended in July 2026. An Amadeus Enterprise search contract, endpoint, authentication details and response schema are required before it can replace the current provider. Do not configure the retired Self-Service URL.
 
 Before store release, replace starter icons and `com.example` app IDs, add a privacy policy URL, confirm provider agreements and entry requirements, and test on physical devices. The app has a curated airport list rather than a complete route network.
+
+At 2.8× zoom, the globe loads visible OpenStreetMap tiles and fades into an interactive north-up map. No Google key is required. Use the map controls to return to the globe or open the same location in Google Maps. For a different licensed OSM tile host, pass `--dart-define=OSM_TILE_URL=https://your-host/{z}/{x}/{y}.png`. Country outlines are simplified from TerraNewsphere's Natural Earth 5.1.2 country dataset (public domain).

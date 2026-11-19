@@ -12,6 +12,7 @@ import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
 import 'data.dart';
 import 'home_ui.dart';
+import 'globe_overlays.dart';
 import 'satellite_layer.dart';
 
 const gold = primaryBlue, panel = Color(0xfff8fbff), muted = secondaryText;
@@ -22,6 +23,19 @@ Quaternion3D northUpRotation(double lat, double lon) =>
     (Quaternion3D.fromAxisAngle(Vector3D.unitX, -lat * pi / 180) *
             Quaternion3D.fromAxisAngle(Vector3D.unitY, -lon * pi / 180))
         .normalized;
+
+class NorthUpGlobeController extends GlobeController {
+  NorthUpGlobeController()
+    : super(autoRotate: false, initialRotation: northUpRotation(0, 0));
+
+  @override
+  void rotateBy(double deltaYaw, double deltaPitch) {
+    // Drag around the geographic axis without tilting toward either pole.
+    if (deltaYaw == 0) return;
+    final (lat, lon) = globeCenter(rotation);
+    rotation = northUpRotation(lat, lon - deltaYaw * 180 / pi);
+  }
+}
 
 class Elsewhere extends StatelessWidget {
   const Elsewhere({super.key});
@@ -76,8 +90,10 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> with TickerProviderStateMixin {
   Place? origin;
   Trip? trip;
+  String airportQuery = '';
   bool manual = false, busy = false, revealed = false;
   int revealVersion = 0, activePhoto = 0;
+  Attraction? hoveredPhoto, pinnedPhoto;
   bool cameraInterrupted = false;
   AnimationController? cameraFlight;
   String notice = '';
@@ -86,15 +102,16 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   final capture = ScreenshotController();
   final fareSection = GlobalKey();
   final attractionSection = GlobalKey();
-  late final GlobeController globe = GlobeController(
-    autoRotate: false,
-    initialRotation: northUpRotation(0, 0),
-  );
+  List<List<Vector3D>> countryLines = const [];
+  final globe = NorthUpGlobeController();
   @override
   void initState() {
     super.initState();
     _locate();
     _loadAssets();
+    loadCountryLines().then((lines) {
+      if (mounted) setState(() => countryLines = lines);
+    });
   }
 
   @override
@@ -145,7 +162,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           accuracy: LocationAccuracy.medium,
         ),
       );
-      final sorted = [...places]
+      final sorted = [...departureAirports]
         ..sort(
           (a, b) => distance(
             pos.latitude,
@@ -168,8 +185,8 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     globe.zoom = 1;
     Future.delayed(const Duration(milliseconds: 1800), () {
       if (!mounted || revealVersion != version || cameraInterrupted) return;
-      final start = globe.rotation;
-      final end = northUpRotation(to.lat, to.lon);
+      final (lat, lon) = globeCenter(globe.rotation);
+      final longitudeDelta = (to.lon - lon + 540) % 360 - 180;
       final animation = AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 2600),
@@ -177,8 +194,11 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       cameraFlight = animation;
       animation.addListener(() {
         final progress = Curves.easeInOutCubic.transform(animation.value);
-        globe.rotation = start.slerp(end, progress);
-        globe.zoom = 1 + 0.25 * progress;
+        globe.rotation = northUpRotation(
+          lat + (to.lat - lat) * progress,
+          lon + longitudeDelta * progress,
+        );
+        globe.zoom = 1 + 0.01 * progress;
       });
       animation.forward();
     });
@@ -202,6 +222,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       notice = '';
       revealed = false;
       activePhoto = 0;
+      hoveredPhoto = pinnedPhoto = null;
     });
     final version = ++revealVersion;
     final targets = destinations..shuffle();
@@ -289,6 +310,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       trip = Trip(from, to, null);
       revealed = false;
       activePhoto = 0;
+      hoveredPhoto = pinnedPhoto = null;
       notice = 'Destination preview · no live fare';
     });
     _fly(from, to, version);
@@ -353,130 +375,78 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           colors: [Color(0xffeaf5ff), Color(0xffdceeff), Color(0xfff8fbff)],
         ),
       ),
-      child: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            final wide = width >= 1100;
-            final tablet = width >= 600;
-            final t = trip;
-            final visualHeight = wide
-                ? 540.0
-                : tablet
-                ? 450.0
-                : min(width - 32, 390.0);
-            final globeSection = SizedBox(
-              height: visualHeight,
-              child: _globeView(t),
-            );
-            final previewSection = SizedBox(
-              height: wide
-                  ? 540
-                  : tablet
-                  ? 450
-                  : 420,
-              child:
-                  t != null &&
-                      revealed &&
-                      (attractions[t.to.city] ?? []).isNotEmpty
-                  ? _photoPreview(t)
-                  : GlassCard(
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.explore_outlined,
-                              size: 54,
-                              color: primaryBlue,
-                            ),
-                            const SizedBox(height: 20),
-                            Text(
-                              t == null
-                                  ? 'Your next escape awaits'
-                                  : 'Finding your destination...',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            const Text(
-                              'A new place is one tap away.',
-                              style: TextStyle(color: muted),
-                            ),
-                          ],
-                        ),
-                      ),
+      child: DisplayFeatureSubScreen(
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              final wide = width >= 1100;
+              final tablet = width >= 600;
+              final t = trip;
+              final shortSide = min(width, constraints.maxHeight);
+              final gutter = (shortSide * 0.04).clamp(12.0, 32.0);
+              final gap = gutter * 0.85;
+              final globeSection = LayoutBuilder(
+                builder: (context, pane) => Padding(
+                  padding: EdgeInsets.only(top: gap * 0.6),
+                  child: SizedBox(
+                    height: min(
+                      pane.maxWidth,
+                      constraints.maxHeight * (wide ? 0.68 : 0.74),
                     ),
-            );
-            return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                tablet ? 24 : 16,
-                16,
-                tablet ? 24 : 16,
-                36,
-              ),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1450),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _header(tablet),
-                      const SizedBox(height: 28),
-                      if (wide)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(flex: 4, child: _heroCopy(true)),
-                            Expanded(flex: 7, child: globeSection),
-                            const SizedBox(width: 20),
-                            Expanded(flex: 5, child: previewSection),
-                          ],
-                        )
-                      else ...[
-                        _heroCopy(false),
-                        const SizedBox(height: 16),
-                        if (width >= 850)
+                    child: _globeView(t),
+                  ),
+                ),
+              );
+              return SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(gutter, gap, gutter, gutter * 1.5),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1450),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _header(tablet),
+                        SizedBox(height: gap),
+                        if (wide)
                           Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              Expanded(flex: 6, child: globeSection),
-                              const SizedBox(width: 16),
-                              Expanded(flex: 4, child: previewSection),
+                              Expanded(flex: 3, child: _heroCopy(true)),
+                              Expanded(flex: 11, child: globeSection),
+                              const Spacer(flex: 2),
                             ],
                           )
                         else ...[
+                          _heroCopy(false),
+                          SizedBox(height: gap),
                           globeSection,
-                          const SizedBox(height: 16),
-                          previewSection,
                         ],
+                        SizedBox(height: gap),
+                        if (wide)
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 7, child: _controls()),
+                              SizedBox(width: gap),
+                              Expanded(flex: 4, child: _surpriseCard()),
+                            ],
+                          )
+                        else ...[
+                          _controls(),
+                          SizedBox(height: gap),
+                          _surpriseCard(),
+                        ],
+                        SizedBox(height: gap),
+                        _shortcuts(),
+                        if (t != null && revealed) _result(t, tablet),
                       ],
-                      const SizedBox(height: 20),
-                      if (wide)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(flex: 7, child: _controls()),
-                            const SizedBox(width: 20),
-                            Expanded(flex: 4, child: _surpriseCard()),
-                          ],
-                        )
-                      else ...[
-                        _controls(),
-                        const SizedBox(height: 16),
-                        _surpriseCard(),
-                      ],
-                      const SizedBox(height: 18),
-                      _shortcuts(),
-                      if (t != null && revealed) _result(t),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     ),
@@ -568,7 +538,10 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 9),
                 InkWell(
-                  onTap: () => setState(() => manual = !manual),
+                  onTap: () => setState(() {
+                    manual = !manual;
+                    airportQuery = '';
+                  }),
                   child: Row(
                     children: [
                       const Icon(Icons.flight_takeoff, color: primaryBlue),
@@ -680,31 +653,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                   );
           },
         ),
-        if (manual)
-          SizedBox(
-            height: 205,
-            child: ListView(
-              children: [
-                for (final p in places)
-                  Material(
-                    color: Colors.transparent,
-                    child: ListTile(
-                      dense: true,
-                      title: Text('${p.city}  ${p.code}'),
-                      onTap: () {
-                        setState(() {
-                          origin = p;
-                          manual = false;
-                        });
-                        cameraInterrupted = true;
-                        cameraFlight?.stop();
-                        globe.rotation = northUpRotation(p.lat, p.lon);
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
+        if (manual) _airportPicker(),
         if (notice.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 10),
@@ -716,6 +665,65 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       ],
     ),
   );
+
+  Widget _airportPicker() {
+    final query = airportQuery.trim().toLowerCase().split(RegExp(r'\s+'));
+    final matches = departureAirports.where((p) {
+      final label =
+          '${p.city} ${p.code} ${p.country} ${p.countryCode} ${GlobeOverlays.names[p.code] ?? ''}'
+              .toLowerCase();
+      return query.every(label.contains);
+    }).toList();
+    return Column(
+      children: [
+        TextField(
+          onChanged: (value) => setState(() => airportQuery = value),
+          decoration: const InputDecoration(
+            labelText: 'Search departure airports',
+            hintText: 'City, country, or IATA code',
+            prefixIcon: Icon(Icons.search),
+          ),
+        ),
+        if (matches.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No matching airports'),
+          )
+        else
+          SizedBox(
+            height: (MediaQuery.sizeOf(context).height * 0.25).clamp(
+              144.0,
+              320.0,
+            ),
+            child: ListView.builder(
+              itemCount: matches.length,
+              itemBuilder: (_, index) {
+                final p = matches[index];
+                return Material(
+                  color: Colors.transparent,
+                  child: ListTile(
+                    dense: true,
+                    title: Text('${p.city}  ${p.code}'),
+                    subtitle: Text(p.country),
+                    onTap: () {
+                      FocusScope.of(context).unfocus();
+                      setState(() {
+                        origin = p;
+                        manual = false;
+                        airportQuery = '';
+                      });
+                      cameraInterrupted = true;
+                      cameraFlight?.stop();
+                      globe.rotation = northUpRotation(p.lat, p.lon);
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
 
   Widget _surpriseCard() => GlassCard(
     child: Row(
@@ -789,7 +797,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                 GestureBinding.instance.pointerSignalResolver.register(event, (
                   _,
                 ) {
-                  _zoom(event.scrollDelta.dy > 0 ? 0.88 : 1.12);
+                  _zoom(exp((-event.scrollDelta.dy / 260).clamp(-0.45, 0.45)));
                 });
               }
             },
@@ -808,14 +816,14 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                   pointOpacity: 0,
                 ),
               ),
-              radiusMultiplier: 0.9,
+              radiusMultiplier: 0.89,
               enableZoom: true,
               onInteractionStart: () {
                 cameraInterrupted = true;
                 cameraFlight?.stop();
               },
               quality: GlobeQuality.auto,
-              autoRotate: t == null,
+              autoRotate: false,
               markers: t == null
                   ? const []
                   : [
@@ -824,7 +832,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                           latitude: t.from.lat,
                           longitude: t.from.lon,
                         ),
-                        label: t.from.code,
+                        label: null,
                         pulse: true,
                       ),
                       GlobeMarker(
@@ -832,12 +840,15 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                           latitude: t.to.lat,
                           longitude: t.to.lon,
                         ),
-                        label: t.to.code,
+                        label: null,
                         pulse: true,
                       ),
                     ],
               layers: [
                 if (earth != null) SatelliteLayer(earth!),
+                GlobeOverlays(countryLines, globe, {
+                  if (t != null) ...[t.from.code, t.to.code],
+                }),
                 if (t != null)
                   GlobeRouteLayer(
                     routes: [
@@ -870,12 +881,12 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
             children: [
               IconButton.filledTonal(
                 tooltip: 'Zoom in',
-                onPressed: () => _zoom(1.25),
+                onPressed: () => _zoom(1.4),
                 icon: const Icon(Icons.add),
               ),
               IconButton.filledTonal(
                 tooltip: 'Zoom out',
-                onPressed: () => _zoom(0.8),
+                onPressed: () => _zoom(1 / 1.4),
                 icon: const Icon(Icons.remove),
               ),
             ],
@@ -903,130 +914,127 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
             ),
           ),
         ),
+        Positioned.fill(
+          child: ListenableBuilder(
+            listenable: globe,
+            builder: (context, _) => globe.zoom >= 2.8
+                ? DetailedMap(
+                    center: globeCenter(globe.rotation),
+                    onExit: (center) {
+                      globe.rotation = northUpRotation(center.$1, center.$2);
+                      globe.zoom = 2.45;
+                    },
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ),
+        if (t != null && revealed && (attractions[t.to.city] ?? []).isNotEmpty)
+          Positioned.fill(child: _photoPreview(t)),
       ],
     ),
   );
 
-  Widget _photoPreview(Trip t) {
-    final photos = attractions[t.to.city]!;
-    final selected = photos[activePhoto % photos.length];
-    Widget thumbnail(int i) => MouseRegion(
-      onEnter: (_) => setState(() => activePhoto = i),
-      child: GestureDetector(
-        onTap: () => setState(() => activePhoto = i),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          margin: const EdgeInsets.all(3),
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(
-              color: activePhoto == i ? primaryBlue : Colors.white,
-              width: activePhoto == i ? 3 : 1,
-            ),
-          ),
-          child: Image.asset(photos[i].asset, fit: BoxFit.cover),
-        ),
-      ),
-    );
-    return GlassCard(
-      key: attractionSection,
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget _photoPreview(Trip t) => LayoutBuilder(
+    key: attractionSection,
+    builder: (context, bounds) {
+      final photos = attractions[t.to.city]!;
+      final size = min(
+        bounds.maxHeight * 0.15,
+        bounds.maxWidth * 0.92 / photos.length,
+      );
+      final bottom = bounds.maxHeight * 0.16;
+      final previewWidth = min(
+        bounds.maxWidth * 0.82,
+        bounds.maxHeight * 0.44 * 16 / 9,
+      );
+      final preview = hoveredPhoto ?? pinnedPhoto;
+      return Stack(
+        alignment: Alignment.bottomCenter,
         children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 280),
-                    child: Image.asset(
-                      selected.asset,
-                      key: ValueKey(selected.asset),
-                      fit: BoxFit.cover,
-                    ),
+          if (preview != null)
+            Positioned(
+              bottom: bottom + size * 1.13,
+              width: previewWidth,
+              height: previewWidth * 9 / 16,
+              child: IgnorePointer(
+                child: Material(
+                  key: const ValueKey('landmark-preview'),
+                  color: Colors.white,
+                  elevation: 8,
+                  borderRadius: BorderRadius.circular(14),
+                  clipBehavior: Clip.antiAlias,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.asset(preview.asset, fit: BoxFit.cover),
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          width: double.infinity,
+                          color: const Color(0xcc192f60),
+                          padding: const EdgeInsets.all(8),
+                          child: Text(
+                            preview.title,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xb8192f60)],
+                ),
+              ),
+            ),
+          Positioned(
+            bottom: bottom,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (index, photo) in photos.indexed)
+                  SizedBox(
+                    key: ValueKey('landmark-thumbnail-$index'),
+                    width: size,
+                    height: size,
+                    child: Padding(
+                      padding: EdgeInsets.all(size * 0.07),
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        onEnter: (_) => setState(() => hoveredPhoto = photo),
+                        onExit: (_) => setState(() => hoveredPhoto = null),
+                        child: GestureDetector(
+                          onTap: () => setState(() {
+                            pinnedPhoto = pinnedPhoto == photo ? null : photo;
+                          }),
+                          child: Semantics(
+                            button: true,
+                            label: photo.title,
+                            child: Container(
+                              clipBehavior: Clip.antiAlias,
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 2,
+                                ),
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: Image.asset(
+                                photo.asset,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                  Positioned(
-                    left: 20,
-                    right: 16,
-                    bottom: 18,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'DESTINATION PREVIEW',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            letterSpacing: 1.8,
-                          ),
-                        ),
-                        const SizedBox(height: 7),
-                        Text(
-                          t.to.city,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 32,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        Text(
-                          t.to.country,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          selected.title,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 150,
-            child: GridView.builder(
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: photos.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                mainAxisSpacing: 3,
-                crossAxisSpacing: 3,
-                mainAxisExtent: 72,
-              ),
-              itemBuilder: (_, i) => thumbnail(i),
+              ],
             ),
           ),
         ],
-      ),
-    );
-  }
+      );
+    },
+  );
 
-  Widget _result(Trip t) => Padding(
+  Widget _result(Trip t, bool tablet) => Padding(
     padding: const EdgeInsets.only(top: 24),
     child: Screenshot(
       controller: capture,
@@ -1047,8 +1055,8 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              height: MediaQuery.sizeOf(context).width >= 900 ? 250 : 360,
+            AspectRatio(
+              aspectRatio: tablet ? 3.2 : 1.6,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -1072,6 +1080,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                   ),
                   Positioned(
                     left: 24,
+                    right: 24,
                     bottom: 24,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1087,9 +1096,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                         Text(
                           t.to.city,
                           style: TextStyle(
-                            fontSize: MediaQuery.sizeOf(context).width >= 900
-                                ? 40
-                                : 54,
+                            fontSize: tablet ? 40 : 34,
                             fontWeight: FontWeight.w300,
                             color: Colors.white,
                           ),
@@ -1263,7 +1270,10 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     child: Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(a, style: const TextStyle(color: muted)),
+        Flexible(
+          child: Text(a, style: const TextStyle(color: muted)),
+        ),
+        const SizedBox(width: 8),
         Text(
           b,
           style: const TextStyle(
