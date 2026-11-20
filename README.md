@@ -4,6 +4,14 @@ A spontaneous travel app for iOS, Android, and web. Pick a departure airport, ta
 
 ![Elsewhere globe showing the Seoul to Taipei route, airport labels, and landmark thumbnails](docs/globe-preview.jpg)
 
+## Landmark preview
+
+The gallery appears on the globe after arrival. Hover over a thumbnail to enlarge it, or tap to pin the preview.
+
+| Thumbnails | Expanded on hover |
+| --- | --- |
+| ![Landmark thumbnails along the globe](docs/landmark-thumbnails.jpg) | ![Enlarged Haeundae Beach photo above the thumbnails](docs/landmark-hover.jpg) |
+
 ## Run locally
 
 ```sh
