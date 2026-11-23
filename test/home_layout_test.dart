@@ -65,6 +65,9 @@ void main() {
     expect(find.byKey(const ValueKey('landmark-thumbnail-0')), findsWidgets);
     final globe = tester.widget<Globe>(find.byType(Globe));
     expect(globe.enableZoom, isTrue);
+    final centerX = tester.view.physicalSize.width / 2;
+    expect(tester.getCenter(find.byType(Globe)).dx, closeTo(centerX, 1));
+    expect(find.text('Random Traveler'), findsOneWidget);
     final beforeZoom = globe.controller!.zoom;
     await tester.ensureVisible(find.byTooltip('Zoom in'));
     await tester.pump();
@@ -79,6 +82,7 @@ void main() {
     await tester.sendEventToBinding(pointer.scroll(const Offset(0, -120)));
     await tester.pump();
     expect(globe.controller!.zoom, greaterThan(afterButton));
+    expect(tester.getCenter(find.byType(Globe)).dx, closeTo(centerX, 1));
     final thumbnail = find.byKey(const ValueKey('landmark-thumbnail-0')).first;
     await tester.ensureVisible(thumbnail);
     await tester.sendEventToBinding(pointer.hover(tester.getCenter(thumbnail)));
@@ -88,8 +92,11 @@ void main() {
       tester.getSize(preview).height,
       greaterThan(tester.getSize(thumbnail).height * 2),
     );
-    await tester.tap(thumbnail);
+    await tester.tap(thumbnail, kind: PointerDeviceKind.mouse);
     await tester.sendEventToBinding(pointer.hover(Offset.zero));
+    await tester.pump();
+    expect(preview, findsNothing);
+    await tester.tap(thumbnail);
     await tester.pump();
     expect(preview, findsOneWidget);
     tester.view.physicalSize = const Size(900, 844);
@@ -119,7 +126,10 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Tokyo, Japan').last);
     await tester.pump(const Duration(seconds: 5));
-    expect(find.text('SAMPLE DESTINATION · NO LIVE FARE'), findsOneWidget);
+    expect(
+      find.text('Sample trip. No live fare or itinerary was returned.'),
+      findsOneWidget,
+    );
     expect(find.text('Tokyo'), findsWidgets);
     expect(tester.takeException(), isNull);
   });

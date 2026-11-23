@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Elsewhere</string>
+	<string>Random Traveler</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Your location helps find nearby departure airports.</string>
 	<key>CFBundleExecutable</key>

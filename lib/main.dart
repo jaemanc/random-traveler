@@ -5,18 +5,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_globe/flutter_globe.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
 import 'data.dart';
 import 'home_ui.dart';
+import 'flight_search.dart';
 import 'globe_overlays.dart';
 import 'satellite_layer.dart';
 
 const gold = primaryBlue, panel = Color(0xfff8fbff), muted = secondaryText;
-const api = String.fromEnvironment('FLIGHTS_API_URL');
+const mobileFlightKey = String.fromEnvironment('SERPAPI_MOBILE_CONFIG');
+final mobileFlights = !kIsWeb && mobileFlightKey.isNotEmpty
+    ? MobileFlightSearch(mobileFlightKey)
+    : null;
+const configuredFlightApi = String.fromEnvironment('FLIGHTS_API_URL');
+final api = configuredFlightApi.isNotEmpty
+    ? configuredFlightApi
+    : kIsWeb && const {'localhost', '127.0.0.1', '::1'}.contains(Uri.base.host)
+    ? 'http://127.0.0.1:8787'
+    : '';
 void main() => runApp(const Elsewhere());
 
 Quaternion3D northUpRotation(double lat, double lon) =>
@@ -42,7 +52,7 @@ class Elsewhere extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: 'Elsewhere',
+    title: 'Random Traveler',
     theme: elsewhereTheme,
     home: const Home(),
   );
@@ -58,17 +68,26 @@ class Flight {
       currency = j['currency'] ?? 'USD',
       checkedAt = j['checkedAt'] ?? '',
       kind = j['kind'] ?? 'one-way',
-      via = (j['via'] as List? ?? []).cast<String>();
+      via = (j['via'] as List? ?? []).cast<String>(),
+      departAtUtc = DateTime.tryParse(j['departAtUtc'] as String? ?? ''),
+      connections = [
+        for (final Map<String, dynamic> stop
+            in (j['connections'] as List? ?? []))
+          if (stop['code'] is String && stop['minutes'] is num)
+            (stop['code'] as String, (stop['minutes'] as num).round()),
+      ];
   final String airline, depart, arrive, duration, currency, checkedAt, kind;
   final double amount;
   final bool cached;
   final List<String> via;
+  final DateTime? departAtUtc;
+  final List<(String, int)> connections;
 }
 
 class Trip {
-  Trip(this.from, this.to, this.flight);
+  Trip(this.from, this.to, this.flight, [this.tomorrowFlight]);
   final Place from, to;
-  final Flight? flight;
+  final Flight? flight, tomorrowFlight;
 }
 
 class Attraction {
@@ -92,7 +111,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   Trip? trip;
   String airportQuery = '';
   bool manual = false, busy = false, revealed = false;
-  int revealVersion = 0, activePhoto = 0;
+  int revealVersion = 0;
   Attraction? hoveredPhoto, pinnedPhoto;
   bool cameraInterrupted = false;
   AnimationController? cameraFlight;
@@ -221,7 +240,6 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       trip = null;
       notice = '';
       revealed = false;
-      activePhoto = 0;
       hoveredPhoto = pinnedPhoto = null;
     });
     final version = ++revealVersion;
@@ -234,52 +252,55 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       return;
     }
     Trip? found;
-    bool failed = false;
-    if (api.isNotEmpty) {
-      final nearby = [
-        from,
-        ...(places.where((p) => p.code != from.code).toList()..sort(
-              (a, b) => distance(
-                from.lat,
-                from.lon,
-                a,
-              ).compareTo(distance(from.lat, from.lon, b)),
-            ))
-            .take(2),
-      ];
-      for (final airport in nearby) {
-        for (final to in targets.take(6)) {
-          if (airport.code == to.code || airport.city == to.city) continue;
-          try {
-            final uri = Uri.parse(api).replace(
-              queryParameters: {
-                'origin': airport.code,
-                'destination': to.code,
-                'hours': '12',
-                'kind': 'round-trip',
-              },
-            );
-            final response = await http
-                .get(uri)
-                .timeout(const Duration(seconds: 35));
-            if (response.statusCode != 200) {
-              throw Exception('Flight lookup unavailable');
-            }
-            final data = jsonDecode(response.body) as Map<String, dynamic>;
-            if (data['flight'] != null) {
-              found = Trip(
-                airport,
-                to,
-                Flight.fromJson(data['flight'], data['cached'] == true),
-              );
-              break;
-            }
-          } catch (_) {
-            failed = true;
-            break;
+    bool failed = false, limitReached = false;
+    if (mobileFlights != null || api.isNotEmpty) {
+      // Keep the candidate group stable so repeated taps reuse the same pool.
+      final candidates = departureAirports
+          .where(
+            (airport) => airport.code != from.code && airport.city != from.city,
+          )
+          .toList();
+      try {
+        final Map<String, dynamic> data;
+        if (mobileFlights case final search?) {
+          data = await search.search(
+            from.code,
+            candidates.map((p) => p.code).toList(),
+          );
+        } else {
+          final uri = Uri.parse(api).replace(
+            queryParameters: {
+              'origin': from.code,
+              'destination': candidates
+                  .map((airport) => airport.code)
+                  .join(','),
+              'hours': '12',
+              'kind': 'round-trip',
+            },
+          );
+          final response = await http
+              .get(uri)
+              .timeout(const Duration(seconds: 35));
+          if (response.statusCode != 200) {
+            throw Exception('Flight lookup unavailable');
           }
+          data = jsonDecode(response.body) as Map<String, dynamic>;
         }
-        if (found != null || failed) break;
+        if (data['flight'] != null || data['tomorrowFlight'] != null) {
+          final to = candidates.firstWhere(
+            (airport) => airport.code == data['destination'],
+          );
+          found = Trip(
+            from,
+            to,
+            _parseFlight(data['flight'], data['cached'] == true),
+            _parseFlight(data['tomorrowFlight'], data['cached'] == true),
+          );
+        }
+      } on FlightSearchLimit {
+        limitReached = true;
+      } catch (_) {
+        failed = true;
       }
     }
     if (!mounted) return;
@@ -287,9 +308,14 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     setState(() {
       trip = found;
       busy = false;
-      if (failed) {
-        notice =
-            'Live flight search is unavailable. Showing a sample destination.';
+      if (found?.flight == null && found?.tomorrowFlight == null) {
+        notice = limitReached
+            ? 'Flight search limit reached. Try again later.'
+            : api.isEmpty && mobileFlights == null
+            ? 'Live fares are not configured.'
+            : failed
+            ? 'The flight service could not complete the request.'
+            : 'No live fares found in the next 12 hours.';
       }
     });
     _fly(found.from, found.to, version);
@@ -309,7 +335,6 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     setState(() {
       trip = Trip(from, to, null);
       revealed = false;
-      activePhoto = 0;
       hoveredPhoto = pinnedPhoto = null;
       notice = 'Destination preview · no live fare';
     });
@@ -329,10 +354,10 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
             XFile.fromData(
               bytes,
               mimeType: 'image/png',
-              name: 'elsewhere-trip.png',
+              name: 'random-traveler-trip.png',
             ),
           ],
-          fileNameOverrides: const ['elsewhere-trip.png'],
+          fileNameOverrides: const ['random-traveler-trip.png'],
           text: 'My next escape: ${trip!.to.city}, ${trip!.to.country}',
         ),
       );
@@ -413,8 +438,8 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Expanded(flex: 3, child: _heroCopy(true)),
-                              Expanded(flex: 11, child: globeSection),
-                              const Spacer(flex: 2),
+                              Expanded(flex: 10, child: globeSection),
+                              const Spacer(flex: 3),
                             ],
                           )
                         else ...[
@@ -439,7 +464,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                         ],
                         SizedBox(height: gap),
                         _shortcuts(),
-                        if (t != null && revealed) _result(t, tablet),
+                        if (t != null && revealed) _result(t),
                       ],
                     ),
                   ),
@@ -456,11 +481,12 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     children: [
       const Icon(Icons.auto_awesome, color: primaryBlue, size: 30),
       const SizedBox(width: 8),
-      const Text(
-        'Elsewhere',
-        style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+      const Expanded(
+        child: Text(
+          'Random Traveler',
+          style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+        ),
       ),
-      const Spacer(),
       if (tablet) ...[
         const Chip(
           label: Text('Explore'),
@@ -833,7 +859,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                           longitude: t.from.lon,
                         ),
                         label: null,
-                        pulse: true,
+                        pulse: false,
                       ),
                       GlobeMarker(
                         coordinate: GlobeCoordinate(
@@ -841,7 +867,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                           longitude: t.to.lon,
                         ),
                         label: null,
-                        pulse: true,
+                        pulse: false,
                       ),
                     ],
               layers: [
@@ -864,7 +890,9 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                           ),
                         ],
                         color: gold,
-                        vehicleColor: gold,
+                        vehicleColor: const Color(0xffeaf5ff),
+                        vehicleSize: 10,
+                        showVehicle: !revealed,
                         duration: const Duration(milliseconds: 4400),
                         repeat: false,
                       ),
@@ -920,6 +948,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
             builder: (context, _) => globe.zoom >= 2.8
                 ? DetailedMap(
                     center: globeCenter(globe.rotation),
+                    airports: t != null ? [t.from, t.to] : [?origin],
                     onExit: (center) {
                       globe.rotation = northUpRotation(center.$1, center.$2);
                       globe.zoom = 2.45;
@@ -1001,6 +1030,11 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                         onEnter: (_) => setState(() => hoveredPhoto = photo),
                         onExit: (_) => setState(() => hoveredPhoto = null),
                         child: GestureDetector(
+                          supportedDevices: const {
+                            PointerDeviceKind.touch,
+                            PointerDeviceKind.stylus,
+                            PointerDeviceKind.invertedStylus,
+                          },
                           onTap: () => setState(() {
                             pinnedPhoto = pinnedPhoto == photo ? null : photo;
                           }),
@@ -1034,237 +1068,141 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     },
   );
 
-  Widget _result(Trip t, bool tablet) => Padding(
-    padding: const EdgeInsets.only(top: 24),
-    child: Screenshot(
-      controller: capture,
-      child: Container(
-        decoration: BoxDecoration(
-          color: panel,
-          border: Border.all(color: Colors.white, width: 1.5),
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: [
-            BoxShadow(
-              color: primaryBlue.withValues(alpha: 0.08),
-              blurRadius: 30,
-              offset: const Offset(0, 12),
-            ),
-          ],
+  Flight? _parseFlight(Object? value, bool cached) =>
+      value is Map<String, dynamic> ? Flight.fromJson(value, cached) : null;
+
+  String _minutes(int minutes) =>
+      minutes < 60 ? '${minutes}m' : '${minutes ~/ 60}h ${minutes % 60}m';
+
+  Widget _flightDetails(String title, Flight? flight) {
+    if (flight == null) return _cost(title, 'Unavailable');
+    final remaining = flight.departAtUtc?.difference(DateTime.now()).inMinutes;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _cost(title, _money(flight.amount, flight.currency)),
+        if (remaining != null)
+          Text(
+            remaining > 0
+                ? 'Departs in ${_minutes(remaining)}'
+                : flight.departAtUtc!.isAfter(DateTime.now())
+                ? 'Departs in under 1m'
+                : 'Departure time passed',
+          ),
+        Text('${flight.airline} · ${flight.kind}'),
+        Text('${_date(flight.depart)} → ${_date(flight.arrive)}'),
+        _cost('Outbound travel time', flight.duration),
+        _cost(
+          'Stops',
+          flight.via.isEmpty ? 'Nonstop' : 'Via ${flight.via.join(', ')}',
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: tablet ? 3.2 : 1.6,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if ((attractions[t.to.city] ?? []).isNotEmpty)
-                    Image.asset(
-                      attractions[t.to.city]![activePhoto %
-                              attractions[t.to.city]!.length]
-                          .asset,
-                      fit: BoxFit.cover,
-                    )
-                  else
-                    const ColoredBox(color: Color(0xff305b68)),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xb8192f60)],
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 24,
-                    right: 24,
-                    bottom: 24,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'YOUR NEXT ESCAPE IS',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            letterSpacing: 3,
-                          ),
-                        ),
-                        Text(
-                          t.to.city,
-                          style: TextStyle(
-                            fontSize: tablet ? 40 : 34,
-                            fontWeight: FontWeight.w300,
-                            color: Colors.white,
-                          ),
-                        ),
-                        Text(
-                          t.to.country,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if ((attractions[t.to.city] ?? []).isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+        for (final (code, minutes) in flight.connections)
+          _cost('$code layover', _minutes(minutes)),
+        _cost(
+          'Fare last checked (UTC)',
+          flight.checkedAt.isEmpty ? 'Unavailable' : _date(flight.checkedAt),
+        ),
+        if (flight.cached)
+          const Text(
+            'Cached result · Prices may change',
+            style: TextStyle(color: muted),
+          ),
+      ],
+    );
+  }
+
+  Widget _result(Trip t) {
+    final hasFlights = t.flight != null || t.tomorrowFlight != null;
+    return Center(
+      child: FractionallySizedBox(
+        widthFactor: 0.92,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 24),
+            child: Screenshot(
+              controller: capture,
+              child: GlassCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Photo: ${attractions[t.to.city]![activePhoto % attractions[t.to.city]!.length].author} · ${attractions[t.to.city]![activePhoto % attractions[t.to.city]!.length].license}',
-                      style: const TextStyle(color: muted, fontSize: 10),
+                      hasFlights ? 'FLIGHT OPTIONS' : 'TRIP PREVIEW',
+                      style: const TextStyle(
+                        color: primaryBlue,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                      ),
                     ),
-                    TextButton(
-                      onPressed: () => launchUrl(
-                        Uri.parse(
-                          attractions[t.to.city]![activePhoto %
-                                  attractions[t.to.city]!.length]
-                              .source,
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: _ticketAirport(t.from)),
+                        const Icon(Icons.flight_takeoff, color: primaryBlue),
+                        Expanded(child: _ticketAirport(t.to, arrival: true)),
+                      ],
+                    ),
+                    const Divider(height: 28),
+                    KeyedSubtree(
+                      key: fareSection,
+                      child: hasFlights
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _flightDetails('Earliest departure', t.flight),
+                                const Divider(height: 24),
+                                _flightDetails(
+                                  'Tomorrow afternoon',
+                                  t.tomorrowFlight,
+                                ),
+                              ],
+                            )
+                          : const Text(
+                              'Sample trip. No live fare or itinerary was returned.',
+                              style: TextStyle(color: muted),
+                            ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      children: [
+                        TextButton(
+                          onPressed: _surprise,
+                          child: const Text('Surprise Me Again'),
                         ),
-                        mode: LaunchMode.externalApplication,
-                      ),
-                      child: const Text(
-                        'PHOTO & LICENSE ↗',
-                        style: TextStyle(color: gold, fontSize: 10),
-                      ),
+                        TextButton(
+                          onPressed: _share,
+                          child: const Text('Share My Trip'),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.all(22),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    t.flight == null
-                        ? 'SAMPLE DESTINATION · NO LIVE FARE'
-                        : t.flight!.cached
-                        ? 'CACHED OFFER · PRICE MAY CHANGE'
-                        : 'LIVE OFFER · PRICE MAY CHANGE',
-                    style: const TextStyle(
-                      color: gold,
-                      fontSize: 10,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    '${t.from.code}  →  ${t.to.code}',
-                    style: const TextStyle(fontSize: 25),
-                  ),
-                  if (t.flight case final f?) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      '${f.airline} · ${f.kind}',
-                      style: const TextStyle(color: muted),
-                    ),
-                    Text(
-                      '${_date(f.depart)}  →  ${_date(f.arrive)}',
-                      style: const TextStyle(color: muted),
-                    ),
-                    Text(
-                      'Travel time: ${f.duration}',
-                      style: const TextStyle(color: muted),
-                    ),
-                    Text(
-                      f.via.isEmpty ? 'Nonstop' : 'Via ${f.via.join(', ')}',
-                      style: const TextStyle(color: muted),
-                    ),
-                    const Divider(height: 35),
-                    _cost(
-                      'Local budget · 3 days, estimate',
-                      '≈ ${_money(t.to.daily * 3)}',
-                    ),
-                    const Text(
-                      'Local budget is a rough USD estimate; lodging, visas and transfers may vary.',
-                      style: TextStyle(color: muted, fontSize: 11),
-                    ),
-                    if (f.currency == 'USD')
-                      _cost(
-                        'Estimated total',
-                        _money(f.amount + t.to.daily * 3),
-                      ),
-                    Text(
-                      'Fare checked ${_date(f.checkedAt)}. Confirm availability and entry requirements before booking.',
-                      style: const TextStyle(color: muted, fontSize: 11),
-                    ),
-                  ] else
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Text(
-                        'Explore this destination. Flight schedules and prices are unavailable in sample mode.',
-                        style: TextStyle(color: muted, height: 1.5),
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'LOWEST FARE FOUND',
-                    key: fareSection,
-                    style: const TextStyle(
-                      color: gold,
-                      fontSize: 10,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                  const SizedBox(height: 9),
-                  Text(
-                    t.flight == null
-                        ? 'Unavailable in sample mode'
-                        : _money(t.flight!.amount, t.flight!.currency),
-                    style: const TextStyle(color: navyText, fontSize: 24),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    t.flight == null
-                        ? 'No flight price was returned. No sample fare is shown.'
-                        : '${t.flight!.cached ? 'Duffel cache' : 'Duffel live search'} · Checked ${_date(t.flight!.checkedAt)} UTC · Price may change.',
-                    style: const TextStyle(color: muted, fontSize: 11),
-                  ),
-                  const SizedBox(height: 24),
-                  Wrap(
-                    alignment: WrapAlignment.spaceBetween,
-                    children: [
-                      TextButton(
-                        onPressed: _surprise,
-                        child: const Text(
-                          'SURPRISE ME AGAIN',
-                          style: TextStyle(color: gold, fontSize: 10),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: _share,
-                        child: const Text(
-                          'SHARE MY TRIP  ↗',
-                          style: TextStyle(color: gold, fontSize: 10),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Earth: NASA Blue Marble · Photos: Wikimedia Commons',
-                    style: TextStyle(color: muted, fontSize: 10),
-                  ),
-                ],
-              ),
             ),
-          ],
+          ),
         ),
       ),
-    ),
+    );
+  }
+
+  Widget _ticketAirport(Place airport, {bool arrival = false}) => Column(
+    crossAxisAlignment: arrival
+        ? CrossAxisAlignment.end
+        : CrossAxisAlignment.start,
+    children: [
+      Text(
+        airport.code,
+        style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
+      ),
+      Text(airport.city, textAlign: arrival ? TextAlign.end : TextAlign.start),
+      Text(
+        airport.country,
+        textAlign: arrival ? TextAlign.end : TextAlign.start,
+        style: const TextStyle(color: muted),
+      ),
+    ],
   );
+
   Widget _cost(String a, String b) => Padding(
     padding: const EdgeInsets.only(bottom: 13),
     child: Row(
@@ -1274,12 +1212,11 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           child: Text(a, style: const TextStyle(color: muted)),
         ),
         const SizedBox(width: 8),
-        Text(
-          b,
-          style: const TextStyle(
-            color: gold,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
+        Flexible(
+          child: Text(
+            b,
+            textAlign: TextAlign.right,
+            style: const TextStyle(color: gold, fontWeight: FontWeight.bold),
           ),
         ),
       ],

@@ -234,9 +234,15 @@ class GlobeOverlays extends GlobeLayer {
 }
 
 class DetailedMap extends StatefulWidget {
-  const DetailedMap({super.key, required this.center, required this.onExit});
+  const DetailedMap({
+    super.key,
+    required this.center,
+    required this.airports,
+    required this.onExit,
+  });
 
   final (double, double) center;
+  final List<Place> airports;
   final ValueChanged<(double, double)> onExit;
 
   @override
@@ -349,6 +355,30 @@ class _DetailedMapState extends State<DetailedMap> {
                   if (tile.loadFinishedAt != null && !tile.loadError) _reveal();
                   return child;
                 },
+              ),
+              MarkerLayer(
+                markers: [
+                  for (final airport in widget.airports)
+                    Marker(
+                      point: LatLng(airport.lat, airport.lon),
+                      width: 86,
+                      height: 30,
+                      alignment: Alignment.centerRight,
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on,
+                            size: 20,
+                            color: Color(0xff2878f0),
+                          ),
+                          Chip(
+                            visualDensity: VisualDensity.compact,
+                            label: Text(airport.code),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
               RichAttributionWidget(
                 permanentHeight: 22,

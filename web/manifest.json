@@ -1,6 +1,6 @@
 {
-    "name": "Elsewhere",
-    "short_name": "Elsewhere",
+    "name": "Random Traveler",
+    "short_name": "Random Traveler",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

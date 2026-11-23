@@ -14,3 +14,7 @@ dist/
 build/
 .idea/
 *.iml
+
+# Local provider credentials
+.env
+worker/.dev.vars*
