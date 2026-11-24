@@ -39,6 +39,14 @@ Add `SERPAPI_API_KEY` (or `sera_api_key`) to the ignored `.env`, then run on a c
 
 The mobile app calls SerpApi directly and caches the grouped route list by departure airport for two minutes. It shows a search-limit message on HTTP 429. The launcher masks the key in the build configuration. A distributed app binary still contains a recoverable credential, so anyone who extracts it can consume the same quota.
 
+### Test the mobile fare flow in Chrome
+
+```sh
+./scripts/dev-mobile.sh -d chrome
+```
+
+The launcher uses Flutter’s temporary Chrome profile with CORS checks disabled for this local debugging session. Use that window only for app testing. The debug app calls the same Dart fare service as mobile. A plain `flutter run -d chrome` does not inject the key or configure the browser for direct requests.
+
 ### Optional web Worker
 
 To test with SerpApi, add `SERPAPI_API_KEY` to the ignored `.env` file (the existing `sera_api_key` name also works). Start the Worker and Flutter web app together:
@@ -69,3 +77,5 @@ flutter test
 Earth imagery is NASA Blue Marble. Country outlines use public domain Natural Earth data from TerraNewsphere. Landmark photos are from Wikimedia Commons, with source and license recorded in [the photo catalog](assets/attractions.json).
 
 Before store release, replace the starter icons and app IDs, add a privacy policy URL, confirm provider terms, and test on physical devices.
+
+Connecting airport coordinates are bundled from [OurAirports open data](https://github.com/davidmegginson/ourairports-data).

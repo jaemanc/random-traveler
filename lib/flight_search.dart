@@ -95,19 +95,34 @@ class MobileFlightSearch {
     if (!cached) {
       final candidates = (destinations.toList()..shuffle()).take(4).toList();
       try {
+        var limited = false;
         final batches = await Future.wait([
           for (final date in [today, tomorrow])
-            _fetch(origin, candidates, date, zone),
+            _fetch(origin, candidates, date, zone)
+                .then<List<Map<String, dynamic>>?>((value) => value)
+                .catchError((Object error) {
+                  if (error is FlightSearchLimit) limited = true;
+                  return null;
+                }),
         ]);
-        final offers = batches.expand((batch) => batch).toList()
-          ..sort((a, b) {
-            final byTime = (a['departAtUtc'] as String).compareTo(
-              b['departAtUtc'] as String,
-            );
-            return byTime != 0
-                ? byTime
-                : (a['amount'] as num).compareTo(b['amount'] as num);
-          });
+        if (limited) _blockedUntil = now.add(const Duration(minutes: 5));
+        if (batches.every((batch) => batch == null)) {
+          if (limited) throw FlightSearchLimit();
+          throw StateError('Flight lookup failed');
+        }
+        final offers =
+            batches
+                .whereType<List<Map<String, dynamic>>>()
+                .expand((batch) => batch)
+                .toList()
+              ..sort((a, b) {
+                final byTime = (a['departAtUtc'] as String).compareTo(
+                  b['departAtUtc'] as String,
+                );
+                return byTime != 0
+                    ? byTime
+                    : (a['amount'] as num).compareTo(b['amount'] as num);
+              });
         pool = (fetched: DateTime.now(), offers: offers);
         _pools[origin] = pool;
       } on FlightSearchLimit {
@@ -169,7 +184,7 @@ class MobileFlightSearch {
             'hl': 'en',
           }),
         )
-        .timeout(const Duration(seconds: 30));
+        .timeout(const Duration(seconds: 8));
     if (response.statusCode == 429) throw FlightSearchLimit();
     if (response.statusCode != 200) throw StateError('Flight lookup failed');
     final body = jsonDecode(response.body) as Map<String, dynamic>;
@@ -236,9 +251,23 @@ class MobileFlightSearch {
         'amount': price,
         'currency': 'USD',
         'checkedAt': checked,
-        'via': [for (final stop in connections) stop['code']],
+        'via': [
+          for (final segment in segments.take(segments.length - 1))
+            if (segment['arrival_airport']?['id'] case final String code) code,
+        ],
         'connections': connections,
         'kind': 'round-trip',
+        'bookingUrl': metadata?['google_flights_url'],
+        'outboundSegments': [
+          for (final segment in segments)
+            {
+              'from': segment['departure_airport']?['id'],
+              'to': segment['arrival_airport']?['id'],
+              'depart': segment['departure_airport']?['time'],
+              'arrive': segment['arrival_airport']?['time'],
+              'number': segment['flight_number'],
+            },
+        ],
       });
     }
     return offers;

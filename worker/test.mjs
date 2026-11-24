@@ -67,12 +67,12 @@ globalThis.fetch = async url => {
  const options = ['FUK', 'NRT'].map(id => ({
   price: 200, total_duration: 150,
   flights: [{
-   airline:'Example Air',
+   airline:'Example Air', flight_number:'EX 412',
    departure_airport:{id:'ICN', time:departure},
    arrival_airport:{id, time:params.get('outbound_date') + ' 15:45'},
   }],
  }));
- return Response.json({search_metadata:{status:'Success'},best_flights:options});
+ return Response.json({search_metadata:{status:'Success',google_flights_url:'https://www.google.com/travel/flights?tfs=test'},best_flights:options});
 };
 try {
  Math.random = () => 0;
@@ -81,6 +81,10 @@ try {
  assert.equal(first.poolSize, 2);
  assert.equal(first.destination, 'FUK');
  assert.equal(first.tomorrowFlight.destination, first.destination);
+ assert.equal(first.tomorrowFlight.outboundSegments[0].number, 'EX 412');
+ assert.equal(first.tomorrowFlight.outboundSegments[0].from, 'ICN');
+ assert.deepEqual(first.tomorrowFlight.returnSegments, []);
+ assert.match(first.tomorrowFlight.bookingUrl, /google.com/);
  assert.deepEqual(groups, ['FUK,NRT', 'FUK,NRT']);
  Math.random = () => 0.99;
  const second = await (await worker.fetch(grouped('FUK,NRT'), {SERPAPI_API_KEY:'test'})).json();

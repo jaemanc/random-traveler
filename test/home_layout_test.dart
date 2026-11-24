@@ -18,11 +18,12 @@ void main() {
       () async => Future<void>.delayed(const Duration(milliseconds: 200)),
     );
     await tester.pump();
-    if (find.text('Seoul  ICN').evaluate().isEmpty) {
-      await tester.ensureVisible(find.text('Choose an airport'));
-      await tester.tap(find.text('Choose an airport'));
-      await tester.pump();
-    }
+    expect(find.text('Choose an airport'), findsNothing);
+    expect(find.text('Search departure airports'), findsNothing);
+    final departure = find.byIcon(Icons.flight_takeoff).first;
+    await tester.ensureVisible(departure);
+    await tester.tap(departure);
+    await tester.pump();
     final airportSearch = find.widgetWithText(
       TextField,
       'Search departure airports',
@@ -51,6 +52,8 @@ void main() {
     final (afterLat, afterLon) = globeCenter(controller.rotation);
     expect(afterLat, closeTo(beforeLat, 0.000001));
     expect(afterLon, isNot(closeTo(beforeLon, 0.000001)));
+    final idleGlobe = tester.widget<Globe>(find.byType(Globe));
+    expect(idleGlobe.layers.whereType<AmbientFlights>(), hasLength(1));
     await tester.ensureVisible(find.text('SURPRISE ME'));
     await tester.tap(find.text('SURPRISE ME'));
     await tester.pump(const Duration(seconds: 5));
@@ -64,6 +67,7 @@ void main() {
     expect(find.byTooltip('Zoom in'), findsOneWidget);
     expect(find.byKey(const ValueKey('landmark-thumbnail-0')), findsWidgets);
     final globe = tester.widget<Globe>(find.byType(Globe));
+    expect(globe.layers.whereType<GlobeRouteLayer>().single.routes.length, 1);
     expect(globe.enableZoom, isTrue);
     final centerX = tester.view.physicalSize.width / 2;
     expect(tester.getCenter(find.byType(Globe)).dx, closeTo(centerX, 1));

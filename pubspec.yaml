@@ -25,5 +25,6 @@ flutter:
   assets:
     - assets/earth-blue-marble.jpg
     - assets/country-lines.json
+    - assets/airport-coordinates.json
     - assets/attractions.json
     - assets/attractions/

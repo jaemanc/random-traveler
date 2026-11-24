@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'data.dart';
 import 'home_ui.dart';
 import 'flight_search.dart';
@@ -18,13 +19,16 @@ import 'satellite_layer.dart';
 
 const gold = primaryBlue, panel = Color(0xfff8fbff), muted = secondaryText;
 const mobileFlightKey = String.fromEnvironment('SERPAPI_MOBILE_CONFIG');
-final mobileFlights = !kIsWeb && mobileFlightKey.isNotEmpty
+final localBrowser =
+    kIsWeb && const {'localhost', '127.0.0.1', '::1'}.contains(Uri.base.host);
+final mobileFlights =
+    mobileFlightKey.isNotEmpty && (!kIsWeb || (kDebugMode && localBrowser))
     ? MobileFlightSearch(mobileFlightKey)
     : null;
 const configuredFlightApi = String.fromEnvironment('FLIGHTS_API_URL');
 final api = configuredFlightApi.isNotEmpty
     ? configuredFlightApi
-    : kIsWeb && const {'localhost', '127.0.0.1', '::1'}.contains(Uri.base.host)
+    : localBrowser
     ? 'http://127.0.0.1:8787'
     : '';
 void main() => runApp(const Elsewhere());
@@ -58,6 +62,17 @@ class Elsewhere extends StatelessWidget {
   );
 }
 
+class FlightSegment {
+  FlightSegment.fromJson(Map<String, dynamic> json)
+    : from = json['from'] ?? '',
+      to = json['to'] ?? '',
+      depart = json['depart'] ?? '',
+      arrive = json['arrive'] ?? '',
+      number = json['number'] ?? '';
+
+  final String from, to, depart, arrive, number;
+}
+
 class Flight {
   Flight.fromJson(Map<String, dynamic> j, this.cached)
     : airline = j['airline'] ?? '',
@@ -67,7 +82,10 @@ class Flight {
       amount = (j['amount'] as num).toDouble(),
       currency = j['currency'] ?? 'USD',
       checkedAt = j['checkedAt'] ?? '',
-      kind = j['kind'] ?? 'one-way',
+      kind = j['kind'] ?? '',
+      bookingUrl = Uri.tryParse(j['bookingUrl'] as String? ?? ''),
+      outboundSegments = _segments(j['outboundSegments']),
+      returnSegments = _segments(j['returnSegments']),
       via = (j['via'] as List? ?? []).cast<String>(),
       departAtUtc = DateTime.tryParse(j['departAtUtc'] as String? ?? ''),
       connections = [
@@ -76,6 +94,16 @@ class Flight {
           if (stop['code'] is String && stop['minutes'] is num)
             (stop['code'] as String, (stop['minutes'] as num).round()),
       ];
+  static List<FlightSegment> _segments(Object? value) => [
+    if (value is List)
+      for (final segment in value.whereType<Map<String, dynamic>>())
+        if (segment['from'] is String && segment['to'] is String)
+          FlightSegment.fromJson(segment),
+  ];
+
+  final Uri? bookingUrl;
+  final List<FlightSegment> outboundSegments, returnSegments;
+  bool get includesReturnFare => kind == 'round-trip';
   final String airline, depart, arrive, duration, currency, checkedAt, kind;
   final double amount;
   final bool cached;
@@ -88,6 +116,14 @@ class Trip {
   Trip(this.from, this.to, this.flight, [this.tomorrowFlight]);
   final Place from, to;
   final Flight? flight, tomorrowFlight;
+
+  List<Place> routeAirports(Map<String, dynamic> coordinates) => [
+    from,
+    for (final code in (flight ?? tomorrowFlight)?.via ?? const <String>[])
+      if (coordinates[code] case [final num lat, final num lon])
+        Place(code, '', '', '', lat.toDouble(), lon.toDouble(), 0),
+    to,
+  ];
 }
 
 class Attraction {
@@ -107,17 +143,20 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> with TickerProviderStateMixin {
-  Place? origin;
+  Place? origin = departureAirports[Random().nextInt(departureAirports.length)];
+  bool originChosenManually = false;
   Trip? trip;
   String airportQuery = '';
   bool manual = false, busy = false, revealed = false;
   int revealVersion = 0;
   Attraction? hoveredPhoto, pinnedPhoto;
   bool cameraInterrupted = false;
+  SearchFlightBurst? searchBurst;
   AnimationController? cameraFlight;
   String notice = '';
   ui.Image? earth;
   Map<String, List<Attraction>> attractions = {};
+  Map<String, dynamic> airportCoordinates = {};
   final capture = ScreenshotController();
   final fareSection = GlobalKey();
   final attractionSection = GlobalKey();
@@ -126,8 +165,16 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    globe.rotation = northUpRotation(origin!.lat, origin!.lon);
     _locate();
     _loadAssets();
+    rootBundle.loadString('assets/airport-coordinates.json').then((data) {
+      if (mounted) {
+        setState(
+          () => airportCoordinates = jsonDecode(data) as Map<String, dynamic>,
+        );
+      }
+    });
     loadCountryLines().then((lines) {
       if (mounted) setState(() => countryLines = lines);
     });
@@ -173,7 +220,6 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        setState(() => manual = true);
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
@@ -189,10 +235,11 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
             a,
           ).compareTo(distance(pos.latitude, pos.longitude, b)),
         );
+      if (!mounted || originChosenManually || busy || trip != null) return;
       setState(() => origin = sorted.first);
       globe.rotation = northUpRotation(sorted.first.lat, sorted.first.lon);
     } catch (_) {
-      setState(() => manual = true);
+      // Keep the initially selected airport when location is unavailable.
     }
   }
 
@@ -237,6 +284,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     if (from == null) return;
     setState(() {
       busy = true;
+      searchBurst = SearchFlightBurst();
       trip = null;
       notice = '';
       revealed = false;
@@ -308,6 +356,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     setState(() {
       trip = found;
       busy = false;
+      searchBurst = null;
       if (found?.flight == null && found?.tomorrowFlight == null) {
         notice = limitReached
             ? 'Flight search limit reached. Try again later.'
@@ -367,9 +416,9 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   }
 
   String _money(num n, [String currency = 'USD']) =>
-      '${currency == 'USD' ? '\$' : '$currency '}${n.round()}';
+      '${currency == 'USD' ? '\$' : '$currency '}${n.toStringAsFixed(n % 1 == 0 ? 0 : 2)}';
   String _date(String x) =>
-      x.replaceFirst('T', '  ').substring(0, min(16, x.length));
+      x.substring(0, min(16, x.length)).replaceFirst('T', '  ');
   Widget _button(String text, VoidCallback? tap) => SizedBox(
     width: double.infinity,
     child: ElevatedButton(
@@ -464,7 +513,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                         ],
                         SizedBox(height: gap),
                         _shortcuts(),
-                        if (t != null && revealed) _result(t),
+                        if (t != null) _result(t),
                       ],
                     ),
                   ),
@@ -735,6 +784,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                       FocusScope.of(context).unfocus();
                       setState(() {
                         origin = p;
+                        originChosenManually = true;
                         manual = false;
                         airportQuery = '';
                       });
@@ -797,9 +847,9 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   );
 
   VoidCallback? _jumpTo(GlobalKey key) {
-    if (!revealed ||
+    if (trip == null ||
         (key == attractionSection &&
-            (attractions[trip?.to.city] ?? []).isEmpty)) {
+            (!revealed || (attractions[trip?.to.city] ?? []).isEmpty))) {
       return null;
     }
     return () {
@@ -813,155 +863,165 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     };
   }
 
-  Widget _globeView(Trip? t) => ClipRect(
-    child: Stack(
-      children: [
-        Positioned.fill(
-          child: Listener(
-            onPointerSignal: (event) {
-              if (event is PointerScrollEvent) {
-                GestureBinding.instance.pointerSignalResolver.register(event, (
-                  _,
-                ) {
-                  _zoom(exp((-event.scrollDelta.dy / 260).clamp(-0.45, 0.45)));
-                });
-              }
-            },
-            child: Globe(
-              key: ValueKey(t?.to.code),
-              controller: globe,
-              theme: GlobeSkins.midnight.copyWith(
-                atmosphere: const GlobeAtmosphereStyle(
-                  color: Color(0xffa6c9d3),
-                  altitude: 0.08,
-                  glowIntensity: 0.2,
-                  innerShadowIntensity: 0.08,
-                ),
-                surface: GlobeSkins.midnight.surface.copyWith(
-                  surfaceColor: const Color(0xff061624),
-                  pointOpacity: 0,
-                ),
-              ),
-              radiusMultiplier: 0.89,
-              enableZoom: true,
-              onInteractionStart: () {
-                cameraInterrupted = true;
-                cameraFlight?.stop();
+  Widget _globeView(Trip? t) {
+    final routeAirports = t?.routeAirports(airportCoordinates) ?? [?origin];
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return ClipRect(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Listener(
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent) {
+                  GestureBinding.instance.pointerSignalResolver.register(
+                    event,
+                    (_) {
+                      _zoom(
+                        exp((-event.scrollDelta.dy / 260).clamp(-0.45, 0.45)),
+                      );
+                    },
+                  );
+                }
               },
-              quality: GlobeQuality.auto,
-              autoRotate: false,
-              markers: t == null
-                  ? const []
-                  : [
-                      GlobeMarker(
-                        coordinate: GlobeCoordinate(
-                          latitude: t.from.lat,
-                          longitude: t.from.lon,
-                        ),
-                        label: null,
-                        pulse: false,
-                      ),
-                      GlobeMarker(
-                        coordinate: GlobeCoordinate(
-                          latitude: t.to.lat,
-                          longitude: t.to.lon,
-                        ),
-                        label: null,
-                        pulse: false,
-                      ),
-                    ],
-              layers: [
-                if (earth != null) SatelliteLayer(earth!),
-                GlobeOverlays(countryLines, globe, {
-                  if (t != null) ...[t.from.code, t.to.code],
-                }),
-                if (t != null)
-                  GlobeRouteLayer(
-                    routes: [
-                      GlobeRoute(
-                        waypoints: [
-                          GlobeCoordinate(
-                            latitude: t.from.lat,
-                            longitude: t.from.lon,
-                          ),
-                          GlobeCoordinate(
-                            latitude: t.to.lat,
-                            longitude: t.to.lon,
-                          ),
-                        ],
-                        color: gold,
-                        vehicleColor: const Color(0xffeaf5ff),
-                        vehicleSize: 10,
-                        showVehicle: !revealed,
-                        duration: const Duration(milliseconds: 4400),
-                        repeat: false,
-                      ),
-                    ],
+              child: Globe(
+                key: ValueKey(t?.to.code),
+                controller: globe,
+                theme: GlobeSkins.midnight.copyWith(
+                  atmosphere: const GlobeAtmosphereStyle(
+                    color: Color(0xffa6c9d3),
+                    altitude: 0.08,
+                    glowIntensity: 0.2,
+                    innerShadowIntensity: 0.08,
                   ),
+                  surface: GlobeSkins.midnight.surface.copyWith(
+                    surfaceColor: const Color(0xff061624),
+                    pointOpacity: 0,
+                  ),
+                ),
+                radiusMultiplier: 0.89,
+                enableZoom: true,
+                onInteractionStart: () {
+                  cameraInterrupted = true;
+                  cameraFlight?.stop();
+                },
+                quality: GlobeQuality.auto,
+                autoRotate: false,
+                markers: t == null
+                    ? const []
+                    : [
+                        for (final airport in routeAirports)
+                          GlobeMarker.latLng(
+                            latitude: airport.lat,
+                            longitude: airport.lon,
+                            label:
+                                GlobeOverlays.airports.containsKey(airport.code)
+                                ? null
+                                : airport.code,
+                            pulse: false,
+                          ),
+                      ],
+                layers: [
+                  if (earth != null) SatelliteLayer(earth!),
+                  GlobeOverlays(countryLines, globe, {
+                    if (t != null)
+                      ...routeAirports.map((airport) => airport.code),
+                  }),
+                  if (t == null && !reduceMotion) const AmbientFlights(),
+                  if (busy && !reduceMotion) ?searchBurst,
+                  if (t != null)
+                    GlobeRouteLayer(
+                      routes: [
+                        GlobeRoute(
+                          waypoints: [
+                            for (final airport in routeAirports)
+                              GlobeCoordinate(
+                                latitude: airport.lat,
+                                longitude: airport.lon,
+                              ),
+                          ],
+                          color: gold,
+                          vehicleColor: const Color(0xffeaf5ff),
+                          vehicleSize: 10,
+                          showVehicle: !revealed && !reduceMotion,
+                          duration: const Duration(milliseconds: 4400),
+                          repeat: false,
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 12,
+            right: 12,
+            child: Column(
+              children: [
+                IconButton.filledTonal(
+                  tooltip: 'Zoom in',
+                  onPressed: () => _zoom(1.4),
+                  icon: const Icon(Icons.add),
+                ),
+                IconButton.filledTonal(
+                  tooltip: 'Zoom out',
+                  onPressed: () => _zoom(1 / 1.4),
+                  icon: const Icon(Icons.remove),
+                ),
               ],
             ),
           ),
-        ),
-        Positioned(
-          top: 12,
-          right: 12,
-          child: Column(
-            children: [
-              IconButton.filledTonal(
-                tooltip: 'Zoom in',
-                onPressed: () => _zoom(1.4),
-                icon: const Icon(Icons.add),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 9),
+              decoration: BoxDecoration(
+                color: panel,
+                border: Border.all(color: muted),
+                borderRadius: BorderRadius.circular(30),
               ),
-              IconButton.filledTonal(
-                tooltip: 'Zoom out',
-                onPressed: () => _zoom(1 / 1.4),
-                icon: const Icon(Icons.remove),
-              ),
-            ],
-          ),
-        ),
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 9),
-            decoration: BoxDecoration(
-              color: panel,
-              border: Border.all(color: muted),
-              borderRadius: BorderRadius.circular(30),
-            ),
-            child: Text(
-              t == null
-                  ? 'YOUR NEXT JOURNEY'
-                  : '${t.from.code}  →  ${t.to.code}',
-              style: const TextStyle(
-                color: gold,
-                fontSize: 10,
-                letterSpacing: 2,
+              child: Text(
+                busy
+                    ? 'SEARCHING FOR FLIGHTS…'
+                    : t == null
+                    ? 'YOUR NEXT JOURNEY'
+                    : [
+                        t.from.code,
+                        ...(t.flight ?? t.tomorrowFlight)?.via ??
+                            const <String>[],
+                        t.to.code,
+                      ].join('  →  '),
+                style: const TextStyle(
+                  color: gold,
+                  fontSize: 10,
+                  letterSpacing: 2,
+                ),
               ),
             ),
           ),
-        ),
-        Positioned.fill(
-          child: ListenableBuilder(
-            listenable: globe,
-            builder: (context, _) => globe.zoom >= 2.8
-                ? DetailedMap(
-                    center: globeCenter(globe.rotation),
-                    airports: t != null ? [t.from, t.to] : [?origin],
-                    onExit: (center) {
-                      globe.rotation = northUpRotation(center.$1, center.$2);
-                      globe.zoom = 2.45;
-                    },
-                  )
-                : const SizedBox.shrink(),
+          Positioned.fill(
+            child: ListenableBuilder(
+              listenable: globe,
+              builder: (context, _) => globe.zoom >= 2.8
+                  ? DetailedMap(
+                      center: globeCenter(globe.rotation),
+                      airports: routeAirports,
+                      onExit: (center) {
+                        globe.rotation = northUpRotation(center.$1, center.$2);
+                        globe.zoom = 2.45;
+                      },
+                    )
+                  : const SizedBox.shrink(),
+            ),
           ),
-        ),
-        if (t != null && revealed && (attractions[t.to.city] ?? []).isNotEmpty)
-          Positioned.fill(child: _photoPreview(t)),
-      ],
-    ),
-  );
+          if (t != null &&
+              revealed &&
+              (attractions[t.to.city] ?? []).isNotEmpty)
+            Positioned.fill(child: _photoPreview(t)),
+        ],
+      ),
+    );
+  }
 
   Widget _photoPreview(Trip t) => LayoutBuilder(
     key: attractionSection,
@@ -1074,50 +1134,219 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   String _minutes(int minutes) =>
       minutes < 60 ? '${minutes}m' : '${minutes ~/ 60}h ${minutes % 60}m';
 
-  Widget _flightDetails(String title, Flight? flight) {
-    if (flight == null) return _cost(title, 'Unavailable');
-    final remaining = flight.departAtUtc?.difference(DateTime.now()).inMinutes;
+  Uri _bookingLink(Trip trip, Flight flight) {
+    final url = flight.bookingUrl;
+    if (url != null &&
+        url.scheme == 'https' &&
+        url.host == 'www.google.com' &&
+        url.path.startsWith('/travel/flights') &&
+        url.queryParameters.containsKey('tfs')) {
+      return url;
+    }
+    return Uri.https('www.google.com', '/search', {
+      'q':
+          'Google Flights ${trip.from.code} to ${trip.to.code} ${flight.depart.split(RegExp(r"[ T]")).first}',
+    });
+  }
+
+  String _flightTime(String value) {
+    final match = RegExp(r'[T ](\d{2}:\d{2})').firstMatch(value);
+    return match?.group(1) ?? '—';
+  }
+
+  Widget _flightDetails(String title, Trip trip, Flight flight) {
+    final now = DateTime.now();
+    final remaining = flight.departAtUtc?.difference(now).inMinutes;
+    final checked = DateTime.tryParse(flight.checkedAt)?.toLocal();
+    final departureDate = flight.depart.split(RegExp(r'[ T]')).first;
+    final scope = flight.includesReturnFare
+        ? 'Outbound + return total'
+        : flight.kind == 'one-way'
+        ? 'One-way fare'
+        : 'Fare scope unavailable';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _cost(title, _money(flight.amount, flight.currency)),
+        Wrap(
+          spacing: 16,
+          runSpacing: 8,
+          alignment: WrapAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                if (departureDate.isNotEmpty)
+                  Text(
+                    departureDate,
+                    style: const TextStyle(color: primaryBlue),
+                  ),
+              ],
+            ),
+            Text(
+              _money(flight.amount, flight.currency),
+              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+        Text(
+          '${flight.currency} · 1 adult · $scope',
+          style: const TextStyle(color: muted),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          flight.airline,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
         if (remaining != null)
           Text(
             remaining > 0
                 ? 'Departs in ${_minutes(remaining)}'
-                : flight.departAtUtc!.isAfter(DateTime.now())
+                : flight.departAtUtc!.isAfter(now)
                 ? 'Departs in under 1m'
                 : 'Departure time passed',
           ),
-        Text('${flight.airline} · ${flight.kind}'),
-        Text('${_date(flight.depart)} → ${_date(flight.arrive)}'),
-        _cost('Outbound travel time', flight.duration),
-        _cost(
-          'Stops',
-          flight.via.isEmpty ? 'Nonstop' : 'Via ${flight.via.join(', ')}',
-        ),
-        for (final (code, minutes) in flight.connections)
-          _cost('$code layover', _minutes(minutes)),
-        _cost(
-          'Fare last checked (UTC)',
-          flight.checkedAt.isEmpty ? 'Unavailable' : _date(flight.checkedAt),
-        ),
-        if (flight.cached)
-          const Text(
-            'Cached result · Prices may change',
-            style: TextStyle(color: muted),
+        const SizedBox(height: 12),
+        Text(
+          'OUTBOUND · ${flight.duration} · ${flight.via.isEmpty ? 'Nonstop' : '${flight.via.length} ${flight.via.length == 1 ? 'stop' : 'stops'}'}',
+          style: const TextStyle(
+            color: primaryBlue,
+            fontWeight: FontWeight.w700,
           ),
+        ),
+        const Text(
+          'Times are local to each airport.',
+          style: TextStyle(color: muted),
+        ),
+        if (flight.outboundSegments.isNotEmpty)
+          _itinerary(flight.outboundSegments, connections: flight.connections)
+        else
+          Text('${_date(flight.depart)} → ${_date(flight.arrive)}'),
+        if (flight.includesReturnFare) ...[
+          const SizedBox(height: 14),
+          const Text(
+            'RETURN',
+            style: TextStyle(color: primaryBlue, fontWeight: FontWeight.w700),
+          ),
+          if (flight.returnSegments.isNotEmpty)
+            _itinerary(flight.returnSegments)
+          else
+            const Text(
+              'Select the return flight on the booking site.',
+              style: TextStyle(color: muted),
+            ),
+        ],
+        const SizedBox(height: 12),
+        if (checked != null)
+          Text(
+            'Fare checked ${_date(checked.toIso8601String())} ${checked.timeZoneName}${flight.cached ? ' · Cached' : ''}',
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: () async {
+            if (!await launchUrl(_bookingLink(trip, flight)) && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Could not open flight booking.')),
+              );
+            }
+          },
+          icon: const Icon(Icons.open_in_new, size: 17),
+          label: const Text('Find & book flights'),
+        ),
       ],
     );
   }
 
+  Widget _itinerary(
+    List<FlightSegment> segments, {
+    List<(String, int)> connections = const [],
+  }) => Column(
+    children: [
+      for (final (i, segment) in segments.indexed) ...[
+        if (i > 0)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Text(
+              [
+                'Layover · ${segments[i - 1].to}',
+                for (final (code, minutes) in connections)
+                  if (code == segments[i - 1].to) _minutes(minutes),
+                if (segments[i - 1].to != segment.from)
+                  'Change airport to ${segment.from}',
+              ].join(' · '),
+              style: const TextStyle(color: muted),
+            ),
+          ),
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xffeaf5ff),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Expanded(child: _segmentEndpoint(segment.from, segment.depart)),
+              Expanded(
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.flight_takeoff,
+                      color: primaryBlue,
+                      size: 17,
+                    ),
+                    Text(
+                      segment.number.isEmpty ? 'No flight no.' : segment.number,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _segmentEndpoint(
+                  segment.to,
+                  segment.arrive,
+                  arrival: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ],
+  );
+
+  Widget _segmentEndpoint(String code, String time, {bool arrival = false}) =>
+      Column(
+        crossAxisAlignment: arrival
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          Text(
+            _flightTime(time),
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+          ),
+          Text(code, style: const TextStyle(fontWeight: FontWeight.w600)),
+          if (time.length >= 10)
+            Text(
+              time.substring(0, 10),
+              textAlign: arrival ? TextAlign.end : TextAlign.start,
+              style: const TextStyle(fontSize: 10, color: muted),
+            ),
+        ],
+      );
+
   Widget _result(Trip t) {
     final hasFlights = t.flight != null || t.tomorrowFlight != null;
     return Center(
-      child: FractionallySizedBox(
-        widthFactor: 0.92,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 690),
+        child: FractionallySizedBox(
+          widthFactor: 0.96,
           child: Padding(
             padding: const EdgeInsets.only(top: 24),
             child: Screenshot(
@@ -1149,12 +1378,21 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                           ? Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _flightDetails('Earliest departure', t.flight),
-                                const Divider(height: 24),
-                                _flightDetails(
-                                  'Tomorrow afternoon',
-                                  t.tomorrowFlight,
-                                ),
+                                if (t.flight case final flight?)
+                                  _flightDetails(
+                                    'Earliest departure',
+                                    t,
+                                    flight,
+                                  ),
+                                if (t.flight != null &&
+                                    t.tomorrowFlight != null)
+                                  const Divider(height: 24),
+                                if (t.tomorrowFlight case final flight?)
+                                  _flightDetails(
+                                    'Tomorrow afternoon',
+                                    t,
+                                    flight,
+                                  ),
                               ],
                             )
                           : const Text(
@@ -1195,32 +1433,13 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
       ),
       Text(airport.city, textAlign: arrival ? TextAlign.end : TextAlign.start),
-      Text(
-        airport.country,
-        textAlign: arrival ? TextAlign.end : TextAlign.start,
-        style: const TextStyle(color: muted),
-      ),
+      if (airport.country.toLowerCase() != airport.city.toLowerCase())
+        Text(
+          airport.country,
+          textAlign: arrival ? TextAlign.end : TextAlign.start,
+          style: const TextStyle(color: muted),
+        ),
     ],
-  );
-
-  Widget _cost(String a, String b) => Padding(
-    padding: const EdgeInsets.only(bottom: 13),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Flexible(
-          child: Text(a, style: const TextStyle(color: muted)),
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            b,
-            textAlign: TextAlign.right,
-            style: const TextStyle(color: gold, fontWeight: FontWeight.bold),
-          ),
-        ),
-      ],
-    ),
   );
 }
 

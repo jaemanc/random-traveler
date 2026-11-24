@@ -5,6 +5,21 @@ import 'package:elsewhere_travel/main.dart';
 import 'package:flutter_globe/flutter_globe.dart';
 
 void main() {
+  test('round trip route follows its outbound connections in order', () {
+    final from = departureAirports.firstWhere((p) => p.code == 'GMP');
+    final to = departureAirports.firstWhere((p) => p.code == 'FRA');
+    final flight = Flight.fromJson({
+      'amount': 200,
+      'via': ['KIX', 'HEL'],
+    }, false);
+    final trip = Trip(from, to, null, flight);
+    final route = trip.routeAirports({
+      'KIX': [34.43, 135.24],
+      'HEL': [60.32, 24.96],
+    });
+    expect(route.map((p) => p.code), ['GMP', 'KIX', 'HEL', 'FRA']);
+  });
+
   test('nearest airport uses coordinates', () {
     final sorted = [...places]
       ..sort(

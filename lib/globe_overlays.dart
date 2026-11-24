@@ -439,3 +439,126 @@ class _DetailedMapState extends State<DetailedMap> {
     ],
   );
 }
+
+/// Decorative traffic follows independent, continuous tracks, without airport endpoints.
+class AmbientFlights extends GlobeLayer {
+  const AmbientFlights() : super(zIndex: 17);
+
+  static final _silhouette = Path()
+    ..moveTo(0, -8)
+    ..quadraticBezierTo(2, -8, 2, -4)
+    ..lineTo(2, -2)
+    ..lineTo(8, 2)
+    ..lineTo(8, 4)
+    ..lineTo(2, 2)
+    ..lineTo(1.5, 5)
+    ..lineTo(4, 7)
+    ..lineTo(4, 8)
+    ..lineTo(0, 7)
+    ..lineTo(-4, 8)
+    ..lineTo(-4, 7)
+    ..lineTo(-1.5, 5)
+    ..lineTo(-2, 2)
+    ..lineTo(-8, 4)
+    ..lineTo(-8, 2)
+    ..lineTo(-2, -2)
+    ..lineTo(-2, -4)
+    ..quadraticBezierTo(-2, -8, 0, -8)
+    ..close();
+
+  @override
+  void paint(GlobeRenderContext context) {
+    final time = context.animationTimeMs / 1000;
+    final paint = Paint();
+    for (var i = 0; i < 20; i++) {
+      final speed = (i.isEven ? 1 : -1) * (7 + i % 5 * 1.3);
+      final longitude = i * 137.508 + speed * time;
+      final band = (i % 7 - 3) * 15.0;
+      final phase = longitude * pi / 180 + i * 0.63;
+      final latitude = band + 19 * sin(phase);
+      final position = context.rotation.rotateVector(
+        Vector3D.fromDegrees(latitude, longitude),
+      );
+      if (position.z <= 0.12) continue;
+      final step = speed * 0.04;
+      final next = context.rotation.rotateVector(
+        Vector3D.fromDegrees(
+          band + 19 * sin(phase + step * pi / 180),
+          longitude + step,
+        ),
+      );
+      final point = context.camera.project(position).offset;
+      final heading = context.camera.project(next).offset - point;
+      final fade = ((position.z - 0.12) / 0.3).clamp(0.0, 1.0);
+      drawPlane(
+        context.canvas,
+        paint,
+        point,
+        heading.direction,
+        fade,
+        0.65 + i % 3 * 0.09,
+      );
+    }
+  }
+
+  static void drawPlane(
+    Canvas canvas,
+    Paint paint,
+    Offset point,
+    double heading,
+    double fade,
+    double scale,
+  ) {
+    canvas.save();
+    canvas.translate(point.dx, point.dy);
+    canvas.rotate(heading + pi / 2);
+    canvas.scale(scale, scale);
+    canvas.drawPath(
+      _silhouette,
+      paint
+        ..color = const Color(0xff192f60).withValues(alpha: fade * 0.8)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    canvas.drawPath(
+      _silhouette,
+      paint
+        ..color = const Color(0xffd9efff).withValues(alpha: fade)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.restore();
+  }
+}
+
+class SearchFlightBurst extends GlobeLayer {
+  SearchFlightBurst() : super(zIndex: 18);
+
+  static const planeCount = 13;
+  double? _start;
+
+  @override
+  void paint(GlobeRenderContext context) {
+    final elapsed =
+        context.animationTimeMs - (_start ??= context.animationTimeMs);
+    final radius = min(context.camera.radius, context.size.shortestSide / 2);
+    final paint = Paint();
+    for (var i = 0; i < planeCount; i++) {
+      final age = (elapsed - i * 38) / (1400 + i % 4 * 180);
+      if (age < 0) continue;
+      final progress = age % 1;
+      final direction = i * 2.39996;
+      final distance = radius * (0.18 + progress * (0.48 + i % 4 * 0.08));
+      final point =
+          context.camera.center + Offset.fromDirection(direction, distance);
+      final fade = min(progress * 8, (1 - progress) * 4).clamp(0.0, 1.0);
+      AmbientFlights.drawPlane(
+        context.canvas,
+        paint,
+        point,
+        direction,
+        fade,
+        0.78,
+      );
+    }
+  }
+}

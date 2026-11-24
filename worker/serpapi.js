@@ -17,11 +17,13 @@ export async function searchSerpApi({key, origin, destination, date, returnDate,
   const minutes = option.total_duration;
   const duration = Number.isFinite(minutes) ? `PT${Math.floor(minutes/60)}H${minutes%60}M` : '';
   return [{
+   booking_url:body.search_metadata.google_flights_url,
    total_amount:option.price, total_currency:'USD', expires_at:expiresAt,
    checked_at: new Date((body.search_metadata.processed_at ?? '').replace(' UTC', 'Z').replace(' ', 'T')),
    slices:[{
     duration,
     segments:option.flights.map((flight, i) => ({
+     flight_number:flight.flight_number,
      departing_at:flight.departure_airport?.time?.replace(' ', 'T'),
      arriving_at:flight.arrival_airport?.time?.replace(' ', 'T'),
      origin:{iata_code:flight.departure_airport?.id},

@@ -73,7 +73,7 @@ export default {
   const serpKey = env.SERPAPI_API_KEY || env.sera_api_key;
   const provider = serpKey ? 'serpapi' : 'duffel';
   const groupKey = serpKey && pool ? [...requested].sort().join(',') : destination;
-  const key = new Request(`${u.origin}${u.pathname}?version=5&provider=${provider}&origin=${origin}&destination=${groupKey}&pool=${pool}&hours=${hours}&kind=${kind}`);
+  const key = new Request(`${u.origin}${u.pathname}?version=6&provider=${provider}&origin=${origin}&destination=${groupKey}&pool=${pool}&hours=${hours}&kind=${kind}`);
   const edge = globalThis.caches?.default;
   const now = new Date(), end = new Date(+now + hours * hour), zone = zones[origin];
   const today = localDateTime(now, zone).slice(0, 10);
@@ -139,8 +139,17 @@ export default {
    });
    const actualDestination = pool && serpKey ? segments.at(-1)?.destination?.iata_code : destination;
    if (!searched.includes(actualDestination)) continue;
+   const itinerary = slice => (slice?.segments ?? []).map(segment => ({
+    from:segment.origin?.iata_code,
+    to:segment.destination?.iata_code,
+    depart:segment.departing_at,
+    arrive:segment.arriving_at,
+    number:segment.flight_number || (segment.marketing_carrier?.iata_code && segment.marketing_carrier_flight_number
+      ? `${segment.marketing_carrier.iata_code} ${segment.marketing_carrier_flight_number}` : undefined),
+   }));
    offers.push({
-    destination:actualDestination,
+    destination:actualDestination, bookingUrl:offer.booking_url,
+    outboundSegments:itinerary(first), returnSegments:itinerary(offer.slices?.[1]),
     airline: [...new Set(segments.map(s=>s.operating_carrier?.name||s.marketing_carrier?.name).filter(Boolean))].join(' + ') || 'Airline unavailable',
     depart, arrive, departAtUtc:new Date(departure).toISOString(),
     duration:(first.duration||'').replace(/^PT(?:(\d+)H)?(?:(\d+)M)?$/,(_,h,m)=>[h&&h+'h',m&&m+'m'].filter(Boolean).join(' '))||'See itinerary',
