@@ -37,7 +37,7 @@ Add `SERPAPI_API_KEY` (or `sera_api_key`) to the ignored `.env`, then run on a c
 ./scripts/dev-mobile.sh -d <device-id>
 ```
 
-The mobile app calls SerpApi directly and caches the grouped route list by departure airport for two minutes. It shows a search-limit message on HTTP 429. The launcher masks the key in the build configuration. A distributed app binary still contains a recoverable credential, so anyone who extracts it can consume the same quota.
+The mobile app calls SerpApi directly and reuses the in-memory route list by departure airport while eligible flights remain. Cached fares appear immediately, with a background refresh on searches made at least two hours apart. It shows a search-limit message on HTTP 429. The launcher masks the key in the build configuration. A distributed app binary still contains a recoverable credential, so anyone who extracts it can consume the same quota.
 
 ### Test the mobile fare flow in Chrome
 

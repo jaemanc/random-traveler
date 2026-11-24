@@ -63,11 +63,15 @@ const _airportZones = <String, String>{
 class FlightSearchLimit implements Exception {}
 
 class MobileFlightSearch {
-  MobileFlightSearch(this._encodedKey);
+  MobileFlightSearch(this._encodedKey, {DateTime Function()? now})
+    : _now = now ?? DateTime.now;
 
   final String _encodedKey;
-  final _pools =
-      <String, ({DateTime fetched, List<Map<String, dynamic>> offers})>{};
+  final DateTime Function() _now;
+  final _pools = <String, List<Map<String, dynamic>>>{};
+  final _lastRefresh = <String, DateTime>{};
+  final _refreshing = <String>{};
+  static final _random = Random();
   DateTime? _blockedUntil;
 
   String get _key => utf8.decode(
@@ -76,66 +80,122 @@ class MobileFlightSearch {
     ).indexed.map((entry) => entry.$2 ^ ((entry.$1 * 31 + 93) & 255)).toList(),
   );
 
-  Future<Map<String, dynamic>> search(
+  Stream<Map<String, dynamic>> search(
     String origin,
     List<String> destinations,
-  ) async {
-    final now = DateTime.now();
-    if (_blockedUntil?.isAfter(now) ?? false) throw FlightSearchLimit();
+  ) async* {
+    final now = _now();
     tzdata.initializeTimeZones();
     final zone = tz.getLocation(_airportZones[origin] ?? 'UTC');
     final local = tz.TZDateTime.from(now, zone);
     final today = DateTime.utc(local.year, local.month, local.day);
     final tomorrow = today.add(const Duration(days: 1));
     final tomorrowDate = _date(tomorrow);
-    var pool = _pools[origin];
-    final cached =
-        pool != null &&
-        now.difference(pool.fetched) < const Duration(minutes: 2);
-    if (!cached) {
-      final candidates = (destinations.toList()..shuffle()).take(4).toList();
-      try {
-        var limited = false;
-        final batches = await Future.wait([
-          for (final date in [today, tomorrow])
-            _fetch(origin, candidates, date, zone)
-                .then<List<Map<String, dynamic>>?>((value) => value)
-                .catchError((Object error) {
-                  if (error is FlightSearchLimit) limited = true;
-                  return null;
-                }),
-        ]);
-        if (limited) _blockedUntil = now.add(const Duration(minutes: 5));
-        if (batches.every((batch) => batch == null)) {
-          if (limited) throw FlightSearchLimit();
-          throw StateError('Flight lookup failed');
-        }
-        final offers =
-            batches
-                .whereType<List<Map<String, dynamic>>>()
-                .expand((batch) => batch)
-                .toList()
-              ..sort((a, b) {
-                final byTime = (a['departAtUtc'] as String).compareTo(
-                  b['departAtUtc'] as String,
-                );
-                return byTime != 0
-                    ? byTime
-                    : (a['amount'] as num).compareTo(b['amount'] as num);
-              });
-        pool = (fetched: DateTime.now(), offers: offers);
-        _pools[origin] = pool;
-      } on FlightSearchLimit {
-        _blockedUntil = now.add(const Duration(minutes: 5));
-        rethrow;
+    final cached = _routes(
+      _pools[origin] ?? [],
+      destinations,
+      now,
+      tomorrowDate,
+    );
+    final cachedRoute = cached.isEmpty
+        ? null
+        : cached.values.elementAt(_random.nextInt(cached.length));
+    String? selected = cachedRoute?['destination'] as String?;
+    if (cachedRoute != null) {
+      yield {...cachedRoute, 'cached': true};
+      final last = _lastRefresh[origin];
+      if ((last != null && now.difference(last) < const Duration(hours: 2)) ||
+          (_blockedUntil?.isAfter(now) ?? false) ||
+          _refreshing.contains(origin)) {
+        return;
       }
     }
+    if (_blockedUntil?.isAfter(now) ?? false) throw FlightSearchLimit();
+    if (!_refreshing.add(origin)) return;
+    _lastRefresh[origin] = now;
+    final candidates = [
+      ?selected,
+      ...(destinations.where((code) => code != selected).toList()..shuffle()),
+    ].take(4).toList();
+    final offers = [
+      for (final offer in _pools[origin] ?? const <Map<String, dynamic>>[])
+        {...offer, 'cached': true},
+    ];
+    var succeeded = false;
+    var limited = false;
+    Map<String, dynamic>? shown = cachedRoute;
+    try {
+      final batches = Stream.fromFutures([
+        for (final date in [today, tomorrow])
+          _fetch(origin, candidates, date, zone)
+              .then<List<Map<String, dynamic>>?>((value) => value)
+              .catchError((Object error) {
+                if (error is FlightSearchLimit) {
+                  limited = true;
+                  _blockedUntil = _now().add(const Duration(minutes: 5));
+                }
+                return null;
+              }),
+      ]);
+      await for (final batch in batches) {
+        if (batch == null) continue;
+        succeeded = true;
+        final refreshedRoutes = batch.map(_offerDay).toSet();
+        offers.removeWhere(
+          (offer) => refreshedRoutes.contains(_offerDay(offer)),
+        );
+        offers.addAll(batch);
+        offers.sort((a, b) {
+          final byTime = (a['departAtUtc'] as String).compareTo(
+            b['departAtUtc'] as String,
+          );
+          return byTime != 0
+              ? byTime
+              : (a['amount'] as num).compareTo(b['amount'] as num);
+        });
+        final currentTime = _now();
+        _pools[origin] = offers
+            .where(
+              (offer) =>
+                  DateTime.parse(offer['departAtUtc']).isAfter(currentTime),
+            )
+            .toList();
+        final routes = _routes(offers, destinations, currentTime, tomorrowDate);
+        if (routes.isEmpty) continue;
+        selected ??= routes.keys.elementAt(_random.nextInt(routes.length));
+        final route = routes[selected];
+        if (route == null ||
+            (shown != null &&
+                route['flight'] == shown['flight'] &&
+                route['tomorrowFlight'] == shown['tomorrowFlight'])) {
+          continue;
+        }
+        shown = route;
+        yield {...route, 'cached': false};
+      }
+      if (shown == null && limited) throw FlightSearchLimit();
+      if (shown == null && !succeeded) throw StateError('Flight lookup failed');
+    } finally {
+      _refreshing.remove(origin);
+    }
+  }
+
+  (Object?, String) _offerDay(Map<String, dynamic> offer) =>
+      (offer['destination'], (offer['depart'] as String).substring(0, 10));
+
+  Map<String, Map<String, dynamic>> _routes(
+    List<Map<String, dynamic>> offers,
+    List<String> destinations,
+    DateTime now,
+    String tomorrowDate,
+  ) {
     final routes = <String, Map<String, dynamic>>{};
     final deadline = now.add(const Duration(hours: 12));
-    for (final offer in pool.offers) {
+    for (final offer in offers) {
       final departure = DateTime.parse(offer['departAtUtc']);
       if (!departure.isAfter(now)) continue;
       final destination = offer['destination'] as String;
+      if (!destinations.contains(destination)) continue;
       final route = routes.putIfAbsent(
         destination,
         () => {'destination': destination},
@@ -151,15 +211,10 @@ class MobileFlightSearch {
         route['tomorrowFlight'] = offer;
       }
     }
-    final choices = routes.values
-        .where(
-          (route) => route['flight'] != null || route['tomorrowFlight'] != null,
-        )
-        .toList();
-    return {
-      if (choices.isNotEmpty) ...choices[Random().nextInt(choices.length)],
-      'cached': cached,
-    };
+    routes.removeWhere(
+      (_, route) => route['flight'] == null && route['tomorrowFlight'] == null,
+    );
+    return routes;
   }
 
   static String _date(DateTime date) => date.toIso8601String().substring(0, 10);

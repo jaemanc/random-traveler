@@ -308,13 +308,39 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
             (airport) => airport.code != from.code && airport.city != from.city,
           )
           .toList();
+      void accept(Map<String, dynamic> data) {
+        if (!mounted ||
+            version != revealVersion ||
+            (data['flight'] == null && data['tomorrowFlight'] == null)) {
+          return;
+        }
+        final to = candidates.firstWhere(
+          (airport) => airport.code == data['destination'],
+        );
+        final first = found == null;
+        final result = Trip(
+          from,
+          to,
+          _parseFlight(data['flight'], data['cached'] == true),
+          _parseFlight(data['tomorrowFlight'], data['cached'] == true),
+        );
+        found = result;
+        setState(() {
+          trip = result;
+          busy = false;
+          searchBurst = null;
+        });
+        if (first) _showFlight(result, version);
+      }
+
       try {
-        final Map<String, dynamic> data;
         if (mobileFlights case final search?) {
-          data = await search.search(
+          await for (final data in search.search(
             from.code,
             candidates.map((p) => p.code).toList(),
-          );
+          )) {
+            accept(data);
+          }
         } else {
           final uri = Uri.parse(api).replace(
             queryParameters: {
@@ -332,18 +358,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           if (response.statusCode != 200) {
             throw Exception('Flight lookup unavailable');
           }
-          data = jsonDecode(response.body) as Map<String, dynamic>;
-        }
-        if (data['flight'] != null || data['tomorrowFlight'] != null) {
-          final to = candidates.firstWhere(
-            (airport) => airport.code == data['destination'],
-          );
-          found = Trip(
-            from,
-            to,
-            _parseFlight(data['flight'], data['cached'] == true),
-            _parseFlight(data['tomorrowFlight'], data['cached'] == true),
-          );
+          accept(jsonDecode(response.body) as Map<String, dynamic>);
         }
       } on FlightSearchLimit {
         limitReached = true;
@@ -351,23 +366,25 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         failed = true;
       }
     }
-    if (!mounted) return;
-    found ??= Trip(from, targets.first, null);
+    if (!mounted || version != revealVersion || found != null) return;
+    final fallback = Trip(from, targets.first, null);
     setState(() {
-      trip = found;
+      trip = fallback;
       busy = false;
       searchBurst = null;
-      if (found?.flight == null && found?.tomorrowFlight == null) {
-        notice = limitReached
-            ? 'Flight search limit reached. Try again later.'
-            : api.isEmpty && mobileFlights == null
-            ? 'Live fares are not configured.'
-            : failed
-            ? 'The flight service could not complete the request.'
-            : 'No live fares found in the next 12 hours.';
-      }
+      notice = limitReached
+          ? 'Flight search limit reached. Try again later.'
+          : api.isEmpty && mobileFlights == null
+          ? 'Live fares are not configured.'
+          : failed
+          ? 'The flight service could not complete the request.'
+          : 'No eligible live fares found.';
     });
-    _fly(found.from, found.to, version);
+    _showFlight(fallback, version);
+  }
+
+  void _showFlight(Trip result, int version) {
+    _fly(result.from, result.to, version);
     Future.delayed(const Duration(milliseconds: 4500), () {
       if (mounted && revealVersion == version) setState(() => revealed = true);
     });
@@ -1129,7 +1146,9 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   );
 
   Flight? _parseFlight(Object? value, bool cached) =>
-      value is Map<String, dynamic> ? Flight.fromJson(value, cached) : null;
+      value is Map<String, dynamic>
+      ? Flight.fromJson(value, cached || value['cached'] == true)
+      : null;
 
   String _minutes(int minutes) =>
       minutes < 60 ? '${minutes}m' : '${minutes ~/ 60}h ${minutes % 60}m';
